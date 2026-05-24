@@ -1,5 +1,6 @@
 const state = {
   language: localStorage.getItem("hubLanguage") || "en",
+  theme: localStorage.getItem("hubTheme") || "light",
   user: null,
   roles: {},
   clients: [],
@@ -313,6 +314,14 @@ function applyLanguage() {
   $("user-password").placeholder = t("passwordPlaceholder");
   $("lang-en").classList.toggle("active", state.language === "en");
   $("lang-zh").classList.toggle("active", state.language === "zh");
+  $("theme-light").textContent = state.language === "zh" ? "浅色" : "Light";
+  $("theme-dark").textContent = state.language === "zh" ? "深色" : "Dark";
+}
+
+function applyTheme() {
+  document.documentElement.dataset.theme = state.theme;
+  $("theme-light").classList.toggle("active", state.theme === "light");
+  $("theme-dark").classList.toggle("active", state.theme === "dark");
 }
 
 function statusClass(statusCode) {
@@ -405,6 +414,8 @@ function bindEvents() {
 
   $("lang-en").addEventListener("click", () => setLanguage("en"));
   $("lang-zh").addEventListener("click", () => setLanguage("zh"));
+  $("theme-light").addEventListener("click", () => setTheme("light"));
+  $("theme-dark").addEventListener("click", () => setTheme("dark"));
 
   document.querySelectorAll(".filter-button").forEach((button) => {
     button.dataset.filter = button.id.replace("filter-", "");
@@ -456,8 +467,15 @@ function setLanguage(language) {
   render();
 }
 
+function setTheme(theme) {
+  state.theme = theme;
+  localStorage.setItem("hubTheme", theme);
+  applyTheme();
+}
+
 bindEvents();
 applyLanguage();
+applyTheme();
 render();
 load().catch((error) => {
   setConnectionLabel(t("connectionFailed"));

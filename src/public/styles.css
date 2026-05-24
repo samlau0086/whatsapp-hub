@@ -17,6 +17,25 @@
   --shadow: 0 14px 36px rgba(23, 32, 42, 0.08);
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f141b;
+  --surface: #171d26;
+  --surface-soft: #202733;
+  --ink: #e8edf3;
+  --muted: #99a7b8;
+  --line: #303948;
+  --green: #58d68d;
+  --green-soft: #123323;
+  --red: #ff8d82;
+  --red-soft: #3a1c1b;
+  --blue: #8ab7ff;
+  --blue-soft: #172a45;
+  --amber: #ffd076;
+  --amber-soft: #382814;
+  --shadow: 0 16px 38px rgba(0, 0, 0, 0.32);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -53,7 +72,7 @@ button:disabled {
 input,
 textarea,
 select {
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
   min-height: 38px;
   padding: 8px 10px;
@@ -89,7 +108,7 @@ p {
 
 .app-header {
   align-items: center;
-  background: rgba(255, 255, 255, 0.94);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
   border-bottom: 1px solid var(--line);
   display: flex;
   gap: 18px;
@@ -143,7 +162,8 @@ p {
   font-size: 12px;
 }
 
-.language-switch {
+.language-switch,
+.theme-switch {
   background: var(--surface-soft);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -153,7 +173,8 @@ p {
   padding: 4px;
 }
 
-.language-button {
+.language-button,
+.theme-button {
   background: transparent;
   border: 0;
   color: var(--muted);
@@ -162,8 +183,9 @@ p {
   padding: 0 10px;
 }
 
-.language-button.active {
-  background: #fff;
+.language-button.active,
+.theme-button.active {
+  background: var(--surface);
   box-shadow: 0 2px 8px rgba(23, 32, 42, 0.08);
   color: var(--ink);
 }
@@ -244,7 +266,7 @@ p {
 }
 
 .ghost-button {
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
 }
 
@@ -268,7 +290,7 @@ p {
 }
 
 .filter-button.active {
-  background: #fff;
+  background: var(--surface);
   box-shadow: 0 2px 8px rgba(23, 32, 42, 0.08);
   color: var(--ink);
 }
@@ -282,7 +304,7 @@ p {
 }
 
 .client-card {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
   cursor: pointer;
@@ -297,7 +319,7 @@ p {
 }
 
 .client-card.selected {
-  background: #f4f8fc;
+  background: color-mix(in srgb, var(--blue-soft) 42%, var(--surface));
 }
 
 .client-main {
@@ -625,6 +647,7 @@ p {
 @media (max-width: 760px) {
   .app-header,
   .token-form,
+  .theme-switch,
   .user-menu,
   .user-form,
   .user-item,
