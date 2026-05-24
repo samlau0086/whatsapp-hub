@@ -60,6 +60,18 @@ export function requireWebSession(req, res, next) {
   next();
 }
 
+export function getSessionFromCookieHeader(cookieHeader) {
+  const token = getCookieFromHeader(cookieHeader, SESSION_COOKIE);
+  if (!token) return null;
+  const session = getSession(token);
+  if (!session || !session.user || new Date(session.expires_at).getTime() < Date.now()) {
+    deleteSession(token);
+    return null;
+  }
+  touchSession(token);
+  return { ...session, user: publicUser(session.user) };
+}
+
 export function requirePermission(permission) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: "unauthenticated" });
@@ -127,20 +139,15 @@ export function publicUser(user) {
 }
 
 function readSession(req) {
-  const token = getCookie(req, SESSION_COOKIE);
-  if (!token) return null;
-  const session = getSession(token);
-  if (!session || !session.user || new Date(session.expires_at).getTime() < Date.now()) {
-    deleteSession(token);
-    return null;
-  }
-  touchSession(token);
-  return { ...session, user: publicUser(session.user) };
+  return getSessionFromCookieHeader(req.header("cookie") || "");
 }
 
 function getCookie(req, name) {
-  const header = req.header("cookie") || "";
-  const cookies = Object.fromEntries(header.split(";").map((part) => {
+  return getCookieFromHeader(req.header("cookie") || "", name);
+}
+
+function getCookieFromHeader(header, name) {
+  const cookies = Object.fromEntries(String(header || "").split(";").map((part) => {
     const index = part.indexOf("=");
     if (index < 0) return ["", ""];
     return [part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1).trim())];

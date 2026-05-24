@@ -8,6 +8,7 @@ const state = {
   messages: [],
   apiRequests: [],
   users: [],
+  socket: null,
   clientFilter: "all",
   selectedClientId: ""
 };
@@ -365,6 +366,31 @@ async function load() {
   state.users = users.users;
   setConnectionLabel(t("connected"));
   render();
+  connectSocket();
+}
+
+function connectSocket() {
+  if (state.socket?.connected) return;
+  state.socket?.disconnect();
+  state.socket = io({ withCredentials: true });
+  state.socket.on("connect", () => setConnectionLabel(t("connected")));
+  state.socket.on("disconnect", () => setConnectionLabel(t("connectionFailed")));
+  state.socket.on("connect_error", () => setConnectionLabel(t("connectionFailed")));
+  state.socket.on("client:updated", (client) => {
+    if (!can("clients:read")) return;
+    state.clients = [client, ...state.clients.filter((item) => item.id !== client.id)];
+    render();
+  });
+  state.socket.on("task:updated", (task) => {
+    if (!can("tasks:read")) return;
+    state.tasks = [task, ...state.tasks.filter((item) => item.id !== task.id)].slice(0, 50);
+    render();
+  });
+  state.socket.on("message:created", (message) => {
+    if (!can("messages:read")) return;
+    state.messages = [message, ...state.messages.filter((item) => item.id !== message.id)].slice(0, 50);
+    render();
+  });
 }
 
 async function logout() {

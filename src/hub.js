@@ -1,4 +1,5 @@
 import { Server } from "socket.io";
+import { getSessionFromCookieHeader } from "./auth.js";
 import {
   createMessage,
   getClient,
@@ -21,14 +22,24 @@ export function createHub(httpServer) {
 
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token || socket.handshake.headers["x-hub-token"];
-    if (token !== config.apiToken) {
-      return next(new Error("unauthorized"));
+    if (token === config.apiToken) {
+      socket.data.kind = "agent";
+      return next();
     }
-    return next();
+
+    const session = getSessionFromCookieHeader(socket.handshake.headers.cookie || "");
+    if (session?.user) {
+      socket.data.kind = "admin";
+      socket.data.user = session.user;
+      return next();
+    }
+
+    return next(new Error("unauthorized"));
   });
 
   io.on("connection", (socket) => {
     socket.on("client:hello", (payload = {}, ack) => {
+      if (socket.data.kind !== "agent") return ack?.({ ok: false, error: "forbidden" });
       const id = payload.id || socket.id;
       socket.data.clientId = id;
       socketsByClient.set(id, socket.id);
@@ -44,6 +55,7 @@ export function createHub(httpServer) {
     });
 
     socket.on("client:heartbeat", (payload = {}, ack) => {
+      if (socket.data.kind !== "agent") return ack?.({ ok: false, error: "forbidden" });
       const id = payload.id || socket.data.clientId;
       if (!id) return ack?.({ ok: false, error: "client id required" });
       const client = touchClient(id, payload.status || "online");
@@ -52,6 +64,7 @@ export function createHub(httpServer) {
     });
 
     socket.on("message:created", async (payload = {}, ack) => {
+      if (socket.data.kind !== "agent") return ack?.({ ok: false, error: "forbidden" });
       const clientId = payload.clientId || socket.data.clientId;
       if (!clientId) return ack?.({ ok: false, error: "client id required" });
       const message = createMessage({ ...payload, clientId });
@@ -61,6 +74,7 @@ export function createHub(httpServer) {
     });
 
     socket.on("task:result", async (payload = {}, ack) => {
+      if (socket.data.kind !== "agent") return ack?.({ ok: false, error: "forbidden" });
       const task = getTask(payload.taskId);
       if (!task) return ack?.({ ok: false, error: "task not found" });
       const status = payload.ok ? "succeeded" : "failed";
@@ -96,6 +110,7 @@ export function createHub(httpServer) {
     });
 
     socket.on("disconnect", () => {
+      if (socket.data.kind !== "agent") return;
       const clientId = socket.data.clientId;
       if (!clientId) return;
       if (socketsByClient.get(clientId) === socket.id) {
