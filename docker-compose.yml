@@ -3,8 +3,8 @@ services:
     build: .
     restart: unless-stopped
     env_file:
-      - .env
+      - hub.env
     ports:
-      - "3000:3000"
+      - "${HOST_BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-3000}:${PORT:-3000}"
     volumes:
       - ./data:/app/data

@@ -48,6 +48,8 @@ DATABASE_PATH=./data/hub.sqlite
 HUB_API_TOKEN=replace-with-a-long-random-token
 PUBLIC_BASE_URL=https://hub.example.com
 TRUST_PROXY=true
+HOST_BIND_ADDRESS=127.0.0.1
+HOST_PORT=3000
 ```
 
 启动：
@@ -77,9 +79,11 @@ DATABASE_PATH=./data/hub.sqlite
 HUB_API_TOKEN=replace-with-a-long-random-token
 PUBLIC_BASE_URL=https://hub.example.com
 TRUST_PROXY=true
+HOST_BIND_ADDRESS=127.0.0.1
+HOST_PORT=3000
 ```
 
-VPS 需要提前安装 Docker 和 Docker Compose，并允许上述 SSH 用户访问 Docker。首次部署前确认目录存在权限正常，或让 workflow 自动创建 `VPS_DEPLOY_PATH`。
+VPS 需要提前安装 Docker 和 Docker Compose，并允许上述 SSH 用户访问 Docker。首次部署前确认目录存在权限正常，或让 workflow 自动创建 `VPS_DEPLOY_PATH`。Actions 会把该 secret 写成 VPS 上的 `hub.env`，并只把 `HOST_BIND_ADDRESS`、`HOST_PORT`、`PORT` 提供给 Compose 做端口插值，因此 `HUB_API_TOKEN` 里可以包含 `$`。
 
 VPS 镜像只安装 Hub 运行所需依赖，不安装 `whatsapp-web.js` 和 Puppeteer。内网电脑运行 agent 时使用普通 `npm install`，会安装这些 optional dependencies。
 
@@ -186,7 +190,9 @@ curl -X POST https://hub.example.com/api/webhooks \
 
 Hub:
 
-- `PORT`: Hub 端口，默认 `3000`。
+- `PORT`: 容器内 Hub 端口，默认 `3000`。
+- `HOST_BIND_ADDRESS`: VPS 绑定地址。使用 Nginx 反代时建议 `127.0.0.1`。
+- `HOST_PORT`: VPS 绑定端口。如果 `3000` 已被占用，可以改成 `3001`，并让 Nginx 反代到对应端口。
 - `DATABASE_PATH`: SQLite 文件位置，默认 `./data/hub.sqlite`。
 - `HUB_API_TOKEN`: API 和 Socket.IO 认证 token。
 - `PUBLIC_BASE_URL`: Hub 对外访问地址，例如 `https://hub.example.com`。

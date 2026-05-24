@@ -67,7 +67,7 @@ jobs:
           scp -i ~/.ssh/deploy_key -P "$VPS_PORT" "$RUNNER_TEMP/whatsapp-hub.tgz" "$VPS_USER@$VPS_HOST:$VPS_DEPLOY_PATH/.deploy-whatsapp-hub.tgz"
           if [ -n "$VPS_ENV_FILE" ]; then
             printf '%s\n' "$VPS_ENV_FILE" > .env.production
-            scp -i ~/.ssh/deploy_key -P "$VPS_PORT" .env.production "$VPS_USER@$VPS_HOST:$VPS_DEPLOY_PATH/.env"
+            scp -i ~/.ssh/deploy_key -P "$VPS_PORT" .env.production "$VPS_USER@$VPS_HOST:$VPS_DEPLOY_PATH/hub.env"
           fi
 
       - name: Deploy with Docker Compose
@@ -80,19 +80,23 @@ jobs:
             echo "Refusing to deploy to an empty path or /"
             exit 1
           fi
-          find "$DEPLOY_PATH" -mindepth 1 -maxdepth 1 ! -name '.env' ! -name 'data' ! -name '.deploy-whatsapp-hub.tgz' -exec rm -rf {} +
+          find "$DEPLOY_PATH" -mindepth 1 -maxdepth 1 ! -name 'hub.env' ! -name 'data' ! -name '.deploy-whatsapp-hub.tgz' -exec rm -rf {} +
           tar -xzf .deploy-whatsapp-hub.tgz
           rm -f .deploy-whatsapp-hub.tgz
 
-          if [ ! -f .env ]; then
-            echo "Missing $DEPLOY_PATH/.env. Add GitHub secret VPS_ENV_FILE or create .env on the VPS."
+          if [ ! -f hub.env ]; then
+            echo "Missing $DEPLOY_PATH/hub.env. Add GitHub secret VPS_ENV_FILE or create hub.env on the VPS."
             exit 1
           fi
 
+          {
+            grep -E '^(HOST_BIND_ADDRESS|HOST_PORT|PORT)=' hub.env || true
+          } > compose.env
+
           if docker compose version >/dev/null 2>&1; then
-            docker compose up -d --build --remove-orphans
+            docker compose --env-file compose.env up -d --build --remove-orphans
           else
-            docker-compose up -d --build --remove-orphans
+            docker-compose --env-file compose.env up -d --build --remove-orphans
           fi
 
           docker image prune -f
