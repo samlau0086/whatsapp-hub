@@ -232,69 +232,347 @@ curl -H "x-hub-token: replace-with-the-same-value-as-HUB_API_TOKEN" https://ws.g
 
 ## API
 
-所有 `/api/*` 请求需要携带：
+所有 `/api/*` 请求都面向外部业务系统和 WhatsApp client agent，需要携带：
 
 ```http
 x-hub-token: replace-with-a-long-random-token
 ```
 
+示例中的域名请替换为你的 Hub 地址，例如 `https://ws.geekmt.com`。
+
 ### 创建发送任务
+
+请求：
 
 ```bash
 curl -X POST https://hub.example.com/api/tasks/send-message \
   -H "content-type: application/json" \
   -H "x-hub-token: replace-with-a-long-random-token" \
-  -d "{\"to\":\"15551234567\",\"body\":\"hello\"}"
+  -d "{\"to\":\"15551234567\",\"body\":\"hello from hub\",\"metadata\":{\"source\":\"crm\"}}"
 ```
 
-指定 client：
+指定 client 时传 `clientId`；不传 `clientId` 时会随机选择一个在线 client。
 
 ```json
 {
   "clientId": "office-pc-01",
   "to": "15551234567",
-  "body": "hello"
+  "body": "hello from hub",
+  "metadata": {
+    "source": "crm"
+  }
 }
 ```
 
-不传 `clientId` 时会随机选择一个在线 client。
+响应 `202 Accepted`：
+
+```json
+{
+  "task": {
+    "id": "9c52421c-7c6c-46c6-b88a-25f4d3aa8a52",
+    "type": "send-message",
+    "status": "running",
+    "client_id": "office-pc-01",
+    "target_phone": "15551234567",
+    "payload": {
+      "to": "15551234567",
+      "body": "hello from hub",
+      "metadata": {
+        "source": "crm"
+      }
+    },
+    "result": null,
+    "error": null,
+    "created_at": "2026-05-24T10:00:00.000Z",
+    "updated_at": "2026-05-24T10:00:00.100Z",
+    "completed_at": null
+  }
+}
+```
+
+常见错误：
+
+```json
+{
+  "error": "no online clients available"
+}
+```
 
 ### 查询 clients
+
+请求：
 
 ```bash
 curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/api/clients
 ```
 
+响应：
+
+```json
+{
+  "clients": [
+    {
+      "id": "office-pc-01",
+      "name": "Office PC 01",
+      "phone": "15551234567",
+      "status": "online",
+      "metadata": {
+        "platform": "whatsapp-web.js",
+        "pushname": "Sales"
+      },
+      "created_at": "2026-05-24T09:50:00.000Z",
+      "updated_at": "2026-05-24T10:00:15.000Z",
+      "last_seen_at": "2026-05-24T10:00:15.000Z"
+    }
+  ]
+}
+```
+
+查询单个 client：
+
+```bash
+curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/api/clients/office-pc-01
+```
+
+响应：
+
+```json
+{
+  "client": {
+    "id": "office-pc-01",
+    "name": "Office PC 01",
+    "phone": "15551234567",
+    "status": "online",
+    "metadata": {
+      "platform": "whatsapp-web.js"
+    },
+    "created_at": "2026-05-24T09:50:00.000Z",
+    "updated_at": "2026-05-24T10:00:15.000Z",
+    "last_seen_at": "2026-05-24T10:00:15.000Z"
+  }
+}
+```
+
 ### 查询任务
+
+请求：
 
 ```bash
 curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/api/tasks
 curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/api/tasks/<task-id>
 ```
 
+支持查询参数：
+
+- `clientId`: 只看某个 client 的任务。
+- `status`: 只看某个状态，例如 `running`、`succeeded`、`failed`。
+- `limit`: 返回数量，最大 500。
+
+列表响应：
+
+```json
+{
+  "tasks": [
+    {
+      "id": "9c52421c-7c6c-46c6-b88a-25f4d3aa8a52",
+      "type": "send-message",
+      "status": "succeeded",
+      "client_id": "office-pc-01",
+      "target_phone": "15551234567",
+      "payload": {
+        "to": "15551234567",
+        "body": "hello from hub",
+        "metadata": {
+          "source": "crm"
+        }
+      },
+      "result": {
+        "messageId": "true_15551234567@c.us_ABCDEF",
+        "chatId": "15551234567@c.us"
+      },
+      "error": null,
+      "created_at": "2026-05-24T10:00:00.000Z",
+      "updated_at": "2026-05-24T10:00:03.000Z",
+      "completed_at": "2026-05-24T10:00:03.000Z"
+    }
+  ]
+}
+```
+
+单条响应：
+
+```json
+{
+  "task": {
+    "id": "9c52421c-7c6c-46c6-b88a-25f4d3aa8a52",
+    "type": "send-message",
+    "status": "succeeded",
+    "client_id": "office-pc-01",
+    "target_phone": "15551234567",
+    "payload": {
+      "to": "15551234567",
+      "body": "hello from hub",
+      "metadata": {}
+    },
+    "result": {
+      "messageId": "true_15551234567@c.us_ABCDEF",
+      "chatId": "15551234567@c.us"
+    },
+    "error": null,
+    "created_at": "2026-05-24T10:00:00.000Z",
+    "updated_at": "2026-05-24T10:00:03.000Z",
+    "completed_at": "2026-05-24T10:00:03.000Z"
+  }
+}
+```
+
 ### 查询消息
+
+请求：
 
 ```bash
 curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/messages?clientId=office-pc-01&limit=100"
 curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/clients/office-pc-01/messages"
 ```
 
+支持查询参数：
+
+- `clientId`: client ID。
+- `sender`: 发件人。
+- `chatId`: WhatsApp chat ID。
+- `limit`: 返回数量，最大 500。
+
+响应：
+
+```json
+{
+  "messages": [
+    {
+      "id": "8f2fd5ed-0928-4ef9-9f57-57cb7fb359d1",
+      "external_id": "false_15557654321@c.us_123456",
+      "client_id": "office-pc-01",
+      "direction": "inbound",
+      "chat_id": "15557654321@c.us",
+      "sender": "15557654321@c.us",
+      "recipient": "15551234567@c.us",
+      "body": "hi",
+      "message_type": "chat",
+      "payload": {
+        "from": "15557654321@c.us",
+        "to": "15551234567@c.us",
+        "hasMedia": false,
+        "type": "chat"
+      },
+      "created_at": "2026-05-24T10:02:00.000Z",
+      "received_at": "2026-05-24T10:02:01.000Z"
+    }
+  ]
+}
+```
+
 ### 查询 API 请求记录
+
+请求：
 
 ```bash
 curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/requests?limit=100"
 curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/requests?statusCode=500"
 ```
 
-API 请求记录包含 `method`、`path`、`status_code`、`client_ip`、`user_agent`、`response_time_ms`、`created_at` 和脱敏后的 `request_body`。
+响应：
+
+```json
+{
+  "requests": [
+    {
+      "id": "cce7b6ad-42c5-4dd3-912f-830f7a7517d1",
+      "method": "POST",
+      "path": "/api/tasks/send-message",
+      "status_code": 202,
+      "client_ip": "203.0.113.10",
+      "user_agent": "curl/8.0.1",
+      "request_body": {
+        "to": "15551234567",
+        "body": "hello from hub"
+      },
+      "response_time_ms": 18,
+      "created_at": "2026-05-24T10:00:00.000Z"
+    }
+  ]
+}
+```
 
 ### 注册 webhook
+
+请求：
 
 ```bash
 curl -X POST https://hub.example.com/api/webhooks \
   -H "content-type: application/json" \
   -H "x-hub-token: replace-with-a-long-random-token" \
   -d "{\"url\":\"https://example.com/whatsapp-events\",\"events\":[\"message.created\",\"task.updated\"],\"secret\":\"shared-secret\"}"
+```
+
+响应：
+
+```json
+{
+  "webhook": {
+    "id": "5b9c2e53-94d4-4477-9f4d-f68765478204",
+    "url": "https://example.com/whatsapp-events",
+    "events": [
+      "message.created",
+      "task.updated"
+    ],
+    "secret": "shared-secret",
+    "enabled": true,
+    "created_at": "2026-05-24T10:05:00.000Z",
+    "updated_at": "2026-05-24T10:05:00.000Z"
+  }
+}
+```
+
+查询 webhook：
+
+```bash
+curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/api/webhooks
+```
+
+响应：
+
+```json
+{
+  "webhooks": [
+    {
+      "id": "5b9c2e53-94d4-4477-9f4d-f68765478204",
+      "url": "https://example.com/whatsapp-events",
+      "events": [
+        "message.created",
+        "task.updated"
+      ],
+      "secret": "shared-secret",
+      "enabled": true,
+      "created_at": "2026-05-24T10:05:00.000Z",
+      "updated_at": "2026-05-24T10:05:00.000Z"
+    }
+  ]
+}
+```
+
+删除 webhook：
+
+```bash
+curl -X DELETE \
+  -H "x-hub-token: replace-with-a-long-random-token" \
+  https://hub.example.com/api/webhooks/5b9c2e53-94d4-4477-9f4d-f68765478204
+```
+
+响应：
+
+```json
+{
+  "ok": true
+}
 ```
 
 ## 关键环境变量
