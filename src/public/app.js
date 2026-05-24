@@ -253,6 +253,14 @@ function render() {
         <span>${escapeHtml(t("toLabel", { value: task.target_phone || "-" }))}</span>
         <span title="${escapeHtml(fmt(task.updated_at))}">${relativeTime(task.updated_at)}</span>
       </div>
+      ${can("tasks:send") ? `
+        <div class="task-reassign">
+          <select data-assign-select="${escapeHtml(task.id)}">
+            ${state.clients.map((client) => `<option value="${escapeHtml(client.id)}" ${client.id === task.client_id ? "selected" : ""}>${escapeHtml(client.name || client.id)} (${escapeHtml(client.status)})</option>`).join("")}
+          </select>
+          <button class="ghost-button" type="button" data-assign-task="${escapeHtml(task.id)}">Assign</button>
+        </div>
+      ` : ""}
     </article>
   `).join("") : `<div class="empty-state">${escapeHtml(t("noTasks"))}</div>`;
 
@@ -457,6 +465,29 @@ function bindEvents() {
     const id = card.dataset.clientId;
     state.selectedClientId = state.selectedClientId === id ? "" : id;
     render();
+  });
+
+  $("tasks").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-assign-task]");
+    if (!button) return;
+    const taskId = button.dataset.assignTask;
+    const select = document.querySelector(`[data-assign-select="${CSS.escape(taskId)}"]`);
+    const clientId = select?.value;
+    if (!clientId) return;
+    button.disabled = true;
+    await api(`/admin/api/tasks/${taskId}/assign`, {
+      method: "PATCH",
+      body: JSON.stringify({ clientId })
+    })
+      .then(({ task }) => {
+        state.tasks = [task, ...state.tasks.filter((item) => item.id !== task.id)].slice(0, 50);
+        showToast("Task assigned");
+        render();
+      })
+      .catch((error) => showToast(error.message))
+      .finally(() => {
+        button.disabled = false;
+      });
   });
 
   $("send-client").addEventListener("change", (event) => {

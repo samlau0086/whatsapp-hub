@@ -461,6 +461,12 @@ p {
   font-size: 12px;
 }
 
+.task-reassign {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .request-path {
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: 13px;

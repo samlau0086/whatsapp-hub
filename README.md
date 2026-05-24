@@ -251,7 +251,13 @@ curl -X POST https://hub.example.com/api/tasks/send-message \
   -d "{\"to\":\"15551234567\",\"body\":\"hello from hub\",\"metadata\":{\"source\":\"crm\"}}"
 ```
 
-指定 client 时传 `clientId`；不传 `clientId` 时会随机选择一个在线 client。
+调度规则：
+
+- 如果目标手机号之前已有成功的 outbound 发送记录，优先使用上次给该手机号发送消息的 client。
+- 如果该历史 client 当前离线，任务会保持 `queued`，等该 client 上线后自动发送。
+- 如果没有历史 client，才使用请求里的 `clientId`。
+- 如果没有历史 client 且没有传 `clientId`，随机选择一个在线 client。
+- Web 后台或 API 可以手动把 queued 任务改派给其他 client。
 
 ```json
 {
@@ -283,6 +289,35 @@ curl -X POST https://hub.example.com/api/tasks/send-message \
     },
     "result": null,
     "error": null,
+    "created_at": "2026-05-24T10:00:00.000Z",
+    "updated_at": "2026-05-24T10:00:00.100Z",
+    "completed_at": null
+  }
+}
+```
+
+如果命中历史 client 但该 client 离线，响应里的任务会是 `queued`：
+
+```json
+{
+  "task": {
+    "id": "7a4926da-26bb-4f90-8d1c-3f3ad84b6db4",
+    "type": "send-message",
+    "status": "queued",
+    "client_id": "office-pc-01",
+    "target_phone": "15551234567",
+    "payload": {
+      "to": "15551234567",
+      "body": "hello from hub",
+      "metadata": {},
+      "routing": {
+        "reason": "sticky-target-client",
+        "requestedClientId": null,
+        "stickyClientId": "office-pc-01"
+      }
+    },
+    "result": null,
+    "error": "waiting for client office-pc-01 to come online",
     "created_at": "2026-05-24T10:00:00.000Z",
     "updated_at": "2026-05-24T10:00:00.100Z",
     "completed_at": null
@@ -432,12 +467,14 @@ curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/
 
 ```bash
 curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/messages?clientId=office-pc-01&limit=100"
+curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/messages?targetPhone=15551234567&limit=100"
 curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/clients/office-pc-01/messages"
 ```
 
 支持查询参数：
 
 - `clientId`: client ID。
+- `targetPhone`: 目标手机号，会匹配 `sender`、`recipient` 和 `chat_id`。
 - `sender`: 发件人。
 - `chatId`: WhatsApp chat ID。
 - `limit`: 返回数量，最大 500。
@@ -467,6 +504,41 @@ curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com
       "received_at": "2026-05-24T10:02:01.000Z"
     }
   ]
+}
+```
+
+### 手动改派任务
+
+请求：
+
+```bash
+curl -X PATCH https://hub.example.com/api/tasks/7a4926da-26bb-4f90-8d1c-3f3ad84b6db4/assign \
+  -H "content-type: application/json" \
+  -H "x-hub-token: replace-with-a-long-random-token" \
+  -d "{\"clientId\":\"backup-pc-01\"}"
+```
+
+响应：
+
+```json
+{
+  "task": {
+    "id": "7a4926da-26bb-4f90-8d1c-3f3ad84b6db4",
+    "type": "send-message",
+    "status": "running",
+    "client_id": "backup-pc-01",
+    "target_phone": "15551234567",
+    "payload": {
+      "to": "15551234567",
+      "body": "hello from hub",
+      "metadata": {}
+    },
+    "result": null,
+    "error": null,
+    "created_at": "2026-05-24T10:00:00.000Z",
+    "updated_at": "2026-05-24T10:03:00.000Z",
+    "completed_at": null
+  }
 }
 ```
 

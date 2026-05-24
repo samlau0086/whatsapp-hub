@@ -203,8 +203,8 @@ export function updateTask(id, patch) {
     status: patch.status ?? current.status,
     client_id: patch.clientId ?? current.client_id,
     result: patch.result === undefined ? json(current.result) : json(patch.result),
-    error: patch.error ?? current.error,
-    completed_at: patch.completedAt ?? current.completed_at,
+    error: Object.hasOwn(patch, "error") ? patch.error : current.error,
+    completed_at: Object.hasOwn(patch, "completedAt") ? patch.completedAt : current.completed_at,
     updated_at: now(),
     id
   };
@@ -219,6 +219,16 @@ export function updateTask(id, patch) {
     WHERE id = @id
   `).run(next);
   return getTask(id);
+}
+
+export function assignTask(id, clientId) {
+  return updateTask(id, {
+    clientId,
+    status: "queued",
+    result: null,
+    error: null,
+    completedAt: null
+  });
 }
 
 export function getTask(id) {
@@ -239,6 +249,15 @@ export function listTasks({ clientId, status, limit = 100 } = {}) {
   params.limit = Math.min(Number(limit) || 100, 500);
   const sql = `SELECT * FROM tasks ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC LIMIT @limit`;
   return db.prepare(sql).all(params).map(mapTask);
+}
+
+export function listQueuedTasksForClient(clientId, limit = 100) {
+  return db.prepare(`
+    SELECT * FROM tasks
+    WHERE client_id = ? AND status = 'queued'
+    ORDER BY created_at ASC
+    LIMIT ?
+  `).all(clientId, Math.min(Number(limit) || 100, 500)).map(mapTask);
 }
 
 export function createMessage(message) {
@@ -287,7 +306,7 @@ export function getMessage(id) {
   return mapMessage(db.prepare("SELECT * FROM messages WHERE id = ?").get(id));
 }
 
-export function listMessages({ clientId, sender, chatId, limit = 100 } = {}) {
+export function listMessages({ clientId, sender, chatId, targetPhone, limit = 100 } = {}) {
   const where = [];
   const params = {};
   if (clientId) {
@@ -302,9 +321,27 @@ export function listMessages({ clientId, sender, chatId, limit = 100 } = {}) {
     where.push("chat_id = @chatId");
     params.chatId = chatId;
   }
+  if (targetPhone) {
+    where.push("(sender LIKE @targetPhoneLike OR recipient LIKE @targetPhoneLike OR chat_id LIKE @targetPhoneLike)");
+    params.targetPhoneLike = `%${normalizePhone(targetPhone)}%`;
+  }
   params.limit = Math.min(Number(limit) || 100, 500);
   const sql = `SELECT * FROM messages ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC LIMIT @limit`;
   return db.prepare(sql).all(params).map(mapMessage);
+}
+
+export function findLastOutboundClientForTarget(targetPhone) {
+  const phone = normalizePhone(targetPhone);
+  if (!phone) return null;
+  const row = db.prepare(`
+    SELECT client_id
+    FROM messages
+    WHERE direction = 'outbound'
+      AND (recipient LIKE @targetPhoneLike OR chat_id LIKE @targetPhoneLike)
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get({ targetPhoneLike: `%${phone}%` });
+  return row?.client_id || null;
 }
 
 export function getApiRequest(id) {
@@ -347,6 +384,10 @@ export function listWebhooks(eventName) {
     .all()
     .map(mapWebhook)
     .filter((hook) => !eventName || hook.events.includes(eventName) || hook.events.includes("*"));
+}
+
+function normalizePhone(value) {
+  return String(value || "").replace(/\D/g, "");
 }
 
 export function createUser({ username, displayName, passwordHash, role = "viewer", enabled = true }) {

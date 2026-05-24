@@ -4,6 +4,7 @@ import {
   createMessage,
   getClient,
   getTask,
+  listQueuedTasksForClient,
   listOnlineClients,
   listWebhooks,
   setClientStatus,
@@ -53,6 +54,7 @@ export function createHub(httpServer) {
         status: "online"
       });
       io.emit("client:updated", client);
+      dispatchQueuedTasksForClient(id).catch((error) => console.error("failed to dispatch queued tasks", error));
       ack?.({ ok: true, client });
     });
 
@@ -140,7 +142,15 @@ export function createHub(httpServer) {
     io,
     async dispatchTask(task) {
       const socket = getLiveClientSocket(task.client_id);
-      if (!socket) return failTask(io, task, `client ${task.client_id} is offline`);
+      if (!socket) {
+        const queued = updateTask(task.id, {
+          status: "queued",
+          error: `waiting for client ${task.client_id} to come online`
+        });
+        io.emit("task:updated", queued);
+        await dispatchWebhook("task.updated", queued);
+        return queued;
+      }
 
       const updated = updateTask(task.id, { status: "running" });
       io.emit("task:updated", updated);
@@ -156,6 +166,13 @@ export function createHub(httpServer) {
       }
     }
   };
+}
+
+export async function dispatchQueuedTasksForClient(clientId) {
+  if (!activeIo) return;
+  for (const task of listQueuedTasksForClient(clientId, 20)) {
+    await dispatchExistingTask(activeIo, task);
+  }
 }
 
 export function chooseClient(requestedClientId) {
@@ -204,6 +221,23 @@ async function failTask(io, task, error) {
   io.emit("task:updated", failed);
   await dispatchWebhook("task.updated", failed);
   return failed;
+}
+
+async function dispatchExistingTask(io, task) {
+  const socket = getLiveClientSocket(task.client_id);
+  if (!socket) return task;
+  const updated = updateTask(task.id, { status: "running", error: null });
+  io.emit("task:updated", updated);
+  await dispatchWebhook("task.updated", updated);
+  try {
+    const result = await socket.timeout(30_000).emitWithAck("task:send-message", updated);
+    if (result?.accepted === false) {
+      return failTask(io, task, result.error || `client ${task.client_id} rejected task`);
+    }
+    return updated;
+  } catch {
+    return failTask(io, task, `client ${task.client_id} did not acknowledge task dispatch`);
+  }
 }
 
 async function dispatchWebhook(event, data) {

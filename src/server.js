@@ -18,12 +18,14 @@ import {
   createApiRequest,
   createTask,
   createUser,
+  assignTask,
   createWebhook,
   deleteUser,
   deleteWebhook,
   getClient,
   getTask,
   getUser,
+  findLastOutboundClientForTarget,
   listApiRequests,
   listClients,
   listMessages,
@@ -91,6 +93,7 @@ app.get("/admin/api/messages", requireWebSession, requirePermission("messages:re
       clientId: req.query.clientId,
       sender: req.query.sender,
       chatId: req.query.chatId,
+      targetPhone: req.query.targetPhone,
       limit: req.query.limit
     })
   });
@@ -102,6 +105,16 @@ app.get("/admin/api/clients/:id/messages", requireWebSession, requirePermission(
 
 app.get("/admin/api/tasks", requireWebSession, requirePermission("tasks:read"), (req, res) => {
   res.json({ tasks: listTasks({ clientId: req.query.clientId, status: req.query.status, limit: req.query.limit }) });
+});
+
+app.patch("/admin/api/tasks/:id/assign", requireWebSession, requirePermission("tasks:send"), async (req, res) => {
+  const { clientId } = req.body || {};
+  if (!clientId) return res.status(400).json({ error: "clientId is required" });
+  if (!getClient(clientId)) return res.status(404).json({ error: "client not found" });
+  const task = assignTask(req.params.id, clientId);
+  if (!task) return res.status(404).json({ error: "task not found" });
+  const dispatched = await hub.dispatchTask(task);
+  res.json({ task: dispatched });
 });
 
 app.post("/admin/api/tasks/send-message", requireWebSession, requirePermission("tasks:send"), async (req, res) => {
@@ -216,6 +229,7 @@ app.get("/api/messages", (req, res) => {
       clientId: req.query.clientId,
       sender: req.query.sender,
       chatId: req.query.chatId,
+      targetPhone: req.query.targetPhone,
       limit: req.query.limit
     })
   });
@@ -244,6 +258,16 @@ app.get("/api/tasks/:id", (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: "task not found" });
   res.json({ task });
+});
+
+app.patch("/api/tasks/:id/assign", async (req, res) => {
+  const { clientId } = req.body || {};
+  if (!clientId) return res.status(400).json({ error: "clientId is required" });
+  if (!getClient(clientId)) return res.status(404).json({ error: "client not found" });
+  const task = assignTask(req.params.id, clientId);
+  if (!task) return res.status(404).json({ error: "task not found" });
+  const dispatched = await hub.dispatchTask(task);
+  res.json({ task: dispatched });
 });
 
 app.get("/api/webhooks", (req, res) => {
@@ -283,9 +307,11 @@ async function createAndDispatchMessageTask(req, res) {
     return null;
   }
 
-  const client = chooseClient(clientId);
+  const stickyClientId = findLastOutboundClientForTarget(to);
+  const stickyClient = stickyClientId ? getClient(stickyClientId) : null;
+  const client = stickyClient || (clientId ? getClient(clientId) : chooseClient(null));
   if (!client) {
-    res.status(409).json({ error: clientId ? "requested client is not online" : "no online clients available" });
+    res.status(409).json({ error: clientId ? "requested client was not found" : "no online clients available" });
     return null;
   }
 
@@ -293,7 +319,16 @@ async function createAndDispatchMessageTask(req, res) {
     type: "send-message",
     clientId: client.id,
     targetPhone: to,
-    payload: { to, body, metadata: metadata || {} }
+    payload: {
+      to,
+      body,
+      metadata: metadata || {},
+      routing: {
+        reason: stickyClientId ? "sticky-target-client" : (clientId ? "requested-client" : "random-online-client"),
+        requestedClientId: clientId || null,
+        stickyClientId: stickyClientId || null
+      }
+    }
   });
   return hub.dispatchTask(task);
 }
