@@ -46,6 +46,8 @@ VPS 上的 `.env` 示例：
 PORT=3000
 DATABASE_PATH=./data/hub.sqlite
 HUB_API_TOKEN=replace-with-a-long-random-token
+WEB_ADMIN_USERNAME=admin
+WEB_ADMIN_PASSWORD=replace-with-a-long-random-admin-password
 PUBLIC_BASE_URL=https://hub.example.com
 TRUST_PROXY=true
 HOST_BIND_ADDRESS=127.0.0.1
@@ -77,6 +79,8 @@ docker compose up -d --build
 PORT=3000
 DATABASE_PATH=./data/hub.sqlite
 HUB_API_TOKEN=replace-with-a-long-random-token
+WEB_ADMIN_USERNAME=admin
+WEB_ADMIN_PASSWORD=replace-with-a-long-random-admin-password
 PUBLIC_BASE_URL=https://hub.example.com
 TRUST_PROXY=true
 HOST_BIND_ADDRESS=127.0.0.1
@@ -195,6 +199,8 @@ Hub:
 - `HOST_PORT`: VPS 绑定端口。如果 `3000` 已被占用，可以改成 `3001`，并让 Nginx 反代到对应端口。
 - `DATABASE_PATH`: SQLite 文件位置，默认 `./data/hub.sqlite`。
 - `HUB_API_TOKEN`: API 和 Socket.IO 认证 token。
+- `WEB_ADMIN_USERNAME`: Web 中控访问用户名。不设置时不启用 Web 登录保护。
+- `WEB_ADMIN_PASSWORD`: Web 中控访问密码。不设置时不启用 Web 登录保护。
 - `PUBLIC_BASE_URL`: Hub 对外访问地址，例如 `https://hub.example.com`。
 - `TRUST_PROXY`: 使用 Nginx/Caddy 等反向代理时设为 `true`。
 - `CLIENT_OFFLINE_AFTER_MS`: 心跳超时后标记离线，默认 45 秒。

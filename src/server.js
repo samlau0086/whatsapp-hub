@@ -3,6 +3,7 @@ import express from "express";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { requireWebAdmin } from "./auth.js";
 import { config } from "./config.js";
 import {
   createTask,
@@ -30,7 +31,7 @@ if (config.trustProxy) {
 
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
-app.use(express.static(path.join(__dirname, "public")));
+app.use("/", requireWebAdmin, express.static(path.join(__dirname, "public")));
 
 app.use("/api", (req, res, next) => {
   const token = req.header("x-hub-token") || req.query.token;
