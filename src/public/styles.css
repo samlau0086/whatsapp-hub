@@ -369,6 +369,17 @@ p {
   justify-content: space-between;
 }
 
+.client-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.danger-button {
+  color: var(--red);
+}
+
 .send-form {
   display: grid;
   gap: 12px;

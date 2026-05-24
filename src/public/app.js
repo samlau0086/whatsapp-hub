@@ -50,6 +50,8 @@ const i18n = {
     noRequests: "No API requests recorded yet.",
     noUsers: "No users.",
     noPhone: "No phone",
+    removeClient: "Remove",
+    clientRemoved: "Client removed",
     latestTasks: "Latest 50 tasks",
     latestMessages: "Latest 50 messages",
     recentApiCalls: "{count} recent API calls",
@@ -102,6 +104,8 @@ const i18n = {
     noRequests: "暂无 API 请求记录。",
     noUsers: "暂无用户。",
     noPhone: "无手机号",
+    removeClient: "移除",
+    clientRemoved: "客户端已移除",
     latestTasks: "最近 50 条任务",
     latestMessages: "最近 50 条消息",
     recentApiCalls: "最近 {count} 条 API 调用",
@@ -231,7 +235,10 @@ function render() {
         <span>${escapeHtml(client.phone || t("noPhone"))}</span>
         <span title="${escapeHtml(fmt(client.last_seen_at))}">${relativeTime(client.last_seen_at)}</span>
       </div>
-      <div>${badge(client.status)}</div>
+      <div class="client-actions">
+        ${badge(client.status)}
+        ${can("clients:delete") ? `<button class="ghost-button danger-button" type="button" data-remove-client="${escapeHtml(client.id)}">${escapeHtml(t("removeClient"))}</button>` : ""}
+      </div>
     </article>
   `).join("") : `<div class="empty-state">${escapeHtml(t("noClients"))}</div>`;
 
@@ -460,6 +467,12 @@ function bindEvents() {
   });
 
   $("clients").addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-remove-client]");
+    if (removeButton) {
+      event.stopPropagation();
+      removeClient(removeButton.dataset.removeClient);
+      return;
+    }
     const card = event.target.closest(".client-card");
     if (!card) return;
     const id = card.dataset.clientId;
@@ -516,6 +529,17 @@ function bindEvents() {
         submit.disabled = false;
       });
   });
+}
+
+async function removeClient(clientId) {
+  await api(`/admin/api/clients/${clientId}`, { method: "DELETE" })
+    .then(() => {
+      state.clients = state.clients.filter((client) => client.id !== clientId);
+      if (state.selectedClientId === clientId) state.selectedClientId = "";
+      showToast(t("clientRemoved"));
+      render();
+    })
+    .catch((error) => showToast(error.message));
 }
 
 function setLanguage(language) {
