@@ -111,26 +111,103 @@ server {
 
 ## 内网 WhatsApp Client Agent
 
-每台运行 WhatsApp Web 的内网电脑都运行一个 agent。它只需要能访问 VPS 的 `443` 端口。
+Agent 脚本位于 `agents/wwebjs-client/index.js`，通过 `npm run agent` 启动。每台运行 WhatsApp Web 的内网电脑都运行一个 agent。它只需要能访问 VPS 的 HTTPS 地址，不需要公网 IP，也不需要开放任何入站端口。
 
-内网电脑 `.env` 示例：
+Agent 做的事情：
+
+- 使用 `whatsapp-web.js` 启动 WhatsApp Web client。
+- 首次运行在终端打印二维码，扫码后保存登录会话。
+- 通过 Socket.IO 主动连接 VPS Hub。
+- 向 Hub 注册 `CLIENT_ID`、名称、手机号和在线状态。
+- 接收 Hub 下发的 `send-message` 任务。
+- 把收到的 WhatsApp 消息、发送结果、任务失败原因回传到 Hub。
+
+### 在内网电脑安装
+
+内网电脑需要安装 Node.js LTS。然后获取本项目代码，可以直接 clone GitHub 仓库：
 
 ```bash
-HUB_URL=https://hub.example.com
-CLIENT_ID=office-pc-01
-CLIENT_NAME=Office PC 01
-CLIENT_TOKEN=replace-with-a-long-random-token
-PUPPETEER_HEADLESS=true
+git clone https://github.com/samlau0086/whatsapp-hub.git
+cd whatsapp-hub
+npm install
 ```
 
-运行：
+如果只想部署 agent，也可以只复制这些文件和目录到内网电脑：
+
+```text
+package.json
+agents/wwebjs-client/index.js
+```
+
+但推荐 clone 完整仓库，后续更新更方便。
+
+### Agent 环境变量
+
+在内网电脑的项目根目录创建 `.env`：
 
 ```bash
-npm install
+HUB_URL=https://ws.geekmt.com
+CLIENT_ID=office-pc-01
+CLIENT_NAME=Office PC 01
+CLIENT_TOKEN=replace-with-the-same-value-as-HUB_API_TOKEN
+PUPPETEER_HEADLESS=false
+```
+
+字段说明：
+
+- `HUB_URL`: VPS Hub 公网地址，例如 `https://ws.geekmt.com`。
+- `CLIENT_ID`: 当前内网电脑的唯一 ID。每台电脑必须不同，例如 `office-pc-01`、`store-pc-02`。
+- `CLIENT_NAME`: Web 中控显示名称。
+- `CLIENT_TOKEN`: 必须等于 VPS Hub 的 `HUB_API_TOKEN`。
+- `PUPPETEER_HEADLESS`: 首次调试建议 `false`，稳定后可改为 `true`。
+
+启动 agent：
+
+```bash
 npm run agent
 ```
 
-首次运行会在终端显示二维码，用手机 WhatsApp 扫码登录。每台内网机器请设置不同的 `CLIENT_ID`。
+首次运行会在终端显示二维码，用手机 WhatsApp 扫码登录。扫码成功后，Web 中控的 Clients 列表应看到该 `CLIENT_ID` 在线。
+
+### Windows 持续运行
+
+开发测试可以直接保持 PowerShell 窗口运行：
+
+```powershell
+cd C:\path\to\whatsapp-hub
+npm run agent
+```
+
+生产环境建议使用进程管理器，例如 PM2：
+
+```powershell
+npm install -g pm2
+pm2 start agents/wwebjs-client/index.js --name whatsapp-agent-office-pc-01
+pm2 save
+```
+
+如果使用 PM2，请确保运行命令的目录里存在 `.env`，并且该 Windows 用户有权限保存 `whatsapp-web.js` 的登录会话目录。
+
+### 测试连接
+
+在内网电脑上先确认能访问 VPS Hub：
+
+```bash
+curl https://ws.geekmt.com/health
+```
+
+然后启动 agent。Hub Web 中控应该出现在线 client。也可以用 API 查看：
+
+```bash
+curl -H "x-hub-token: replace-with-the-same-value-as-HUB_API_TOKEN" https://ws.geekmt.com/api/clients
+```
+
+### 注意事项
+
+- 每台内网电脑使用不同的 `CLIENT_ID`，否则后上线的连接会覆盖前一个同 ID client。
+- 不要在 VPS 容器里运行 `npm run agent`。VPS 只运行 Hub，agent 应运行在实际登录 WhatsApp 的内网电脑上。
+- 如果 WhatsApp 退出登录或二维码过期，重新运行 agent 并扫码。
+- `whatsapp-web.js` 使用非官方 WhatsApp Web 接口，请控制发送频率，避免异常批量行为。
 
 ## API
 

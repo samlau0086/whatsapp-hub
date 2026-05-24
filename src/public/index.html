@@ -7,65 +7,115 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div>
-        <h1>WhatsApp Actor Hub</h1>
-        <p>Clients, tasks, messages, and webhook delivery.</p>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-mark">WA</div>
+        <div>
+          <h1>WhatsApp Actor Hub</h1>
+          <p id="connection-label">Disconnected</p>
+        </div>
       </div>
+
       <form id="token-form" class="token-form">
         <input id="token-input" type="password" placeholder="Hub API token" autocomplete="current-password" />
         <button type="submit">Connect</button>
       </form>
     </header>
 
-    <main class="layout">
-      <section class="panel stats">
-        <article><strong id="stat-online">0</strong><span>Online</span></article>
-        <article><strong id="stat-clients">0</strong><span>Clients</span></article>
-        <article><strong id="stat-running">0</strong><span>Running</span></article>
-        <article><strong id="stat-messages">0</strong><span>Messages</span></article>
+    <main class="dashboard">
+      <section class="metric-strip" aria-label="Overview">
+        <article class="metric-card">
+          <span>Online clients</span>
+          <strong id="stat-online">0</strong>
+        </article>
+        <article class="metric-card">
+          <span>Total clients</span>
+          <strong id="stat-clients">0</strong>
+        </article>
+        <article class="metric-card">
+          <span>Running tasks</span>
+          <strong id="stat-running">0</strong>
+        </article>
+        <article class="metric-card">
+          <span>Messages cached</span>
+          <strong id="stat-messages">0</strong>
+        </article>
       </section>
 
-      <section class="panel send-panel">
-        <h2>Send Task</h2>
-        <form id="send-form" class="send-form">
-          <select id="send-client">
-            <option value="">Random online client</option>
-          </select>
-          <input id="send-to" placeholder="Phone, e.g. 15551234567" />
-          <textarea id="send-body" placeholder="Message body"></textarea>
-          <button type="submit">Dispatch</button>
-        </form>
-      </section>
+      <section class="workspace">
+        <aside class="side-panel">
+          <div class="section-head">
+            <div>
+              <h2>Clients</h2>
+              <p id="client-summary">0 online</p>
+            </div>
+            <button id="refresh" class="ghost-button" type="button">Refresh</button>
+          </div>
 
-      <section class="panel table-panel">
-        <div class="panel-head">
-          <h2>Clients</h2>
-          <button id="refresh">Refresh</button>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Status</th><th>Last seen</th></tr></thead>
-            <tbody id="clients"></tbody>
-          </table>
-        </div>
-      </section>
+          <div class="filter-row">
+            <button id="filter-all" class="filter-button active" type="button">All</button>
+            <button id="filter-online" class="filter-button" type="button">Online</button>
+            <button id="filter-offline" class="filter-button" type="button">Offline</button>
+          </div>
 
-      <section class="panel table-panel">
-        <h2>Tasks</h2>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>ID</th><th>Client</th><th>To</th><th>Status</th><th>Updated</th></tr></thead>
-            <tbody id="tasks"></tbody>
-          </table>
-        </div>
-      </section>
+          <div id="clients" class="client-list"></div>
+        </aside>
 
-      <section class="panel feed-panel">
-        <h2>Messages</h2>
-        <div id="messages" class="feed"></div>
+        <section class="main-panel">
+          <div class="compose-panel">
+            <div class="section-head">
+              <div>
+                <h2>Send Message</h2>
+                <p id="dispatch-hint">Random online client</p>
+              </div>
+              <span id="selected-client-pill" class="soft-pill">No client selected</span>
+            </div>
+
+            <form id="send-form" class="send-form">
+              <label>
+                <span>Client</span>
+                <select id="send-client">
+                  <option value="">Random online client</option>
+                </select>
+              </label>
+              <label>
+                <span>Phone</span>
+                <input id="send-to" placeholder="15551234567" />
+              </label>
+              <label class="message-input">
+                <span>Message</span>
+                <textarea id="send-body" placeholder="Type message body"></textarea>
+              </label>
+              <button type="submit">Dispatch task</button>
+            </form>
+          </div>
+
+          <div class="content-grid">
+            <section class="panel-card">
+              <div class="section-head">
+                <div>
+                  <h2>Task Timeline</h2>
+                  <p id="task-summary">Latest 50 tasks</p>
+                </div>
+              </div>
+              <div id="tasks" class="timeline"></div>
+            </section>
+
+            <section class="panel-card">
+              <div class="section-head">
+                <div>
+                  <h2>Message Stream</h2>
+                  <p id="message-summary">Latest 50 messages</p>
+                </div>
+              </div>
+              <div id="messages" class="message-stream"></div>
+            </section>
+          </div>
+        </section>
       </section>
     </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="/app.js"></script>
