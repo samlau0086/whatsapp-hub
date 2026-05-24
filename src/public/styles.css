@@ -341,7 +341,8 @@ p {
 }
 
 .timeline,
-.message-stream {
+.message-stream,
+.request-list {
   display: grid;
   gap: 10px;
   margin-top: 14px;
@@ -351,7 +352,8 @@ p {
 }
 
 .task-item,
-.message {
+.message,
+.request-item {
   border: 1px solid var(--line);
   border-radius: 8px;
   display: grid;
@@ -360,7 +362,8 @@ p {
 }
 
 .task-top,
-.message header {
+.message header,
+.request-top {
   align-items: center;
   display: flex;
   gap: 10px;
@@ -386,12 +389,36 @@ p {
 }
 
 .task-meta,
-.message-meta {
+.message-meta,
+.request-meta {
   color: var(--muted);
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   font-size: 12px;
+}
+
+.request-path {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-ok {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.status-warn {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.status-error {
+  background: var(--red-soft);
+  color: var(--red);
 }
 
 .badge,

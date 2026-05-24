@@ -3,6 +3,7 @@ const state = {
   clients: [],
   tasks: [],
   messages: [],
+  apiRequests: [],
   socket: null,
   clientFilter: "all",
   selectedClientId: ""
@@ -96,6 +97,7 @@ function render() {
   $("client-summary").textContent = `${onlineCount} online / ${state.clients.length} total`;
   $("task-summary").textContent = state.selectedClientId ? `Filtered by ${state.selectedClientId}` : "Latest 50 tasks";
   $("message-summary").textContent = state.selectedClientId ? `Filtered by ${state.selectedClientId}` : "Latest 50 messages";
+  $("request-summary").textContent = `${state.apiRequests.length} recent API calls`;
   $("dispatch-hint").textContent = activeClient ? `Dispatching with ${activeClient.name || activeClient.id}` : "Random online client";
   $("selected-client-pill").textContent = activeClient ? activeClient.id : "No client selected";
 
@@ -152,9 +154,30 @@ function render() {
     </article>
   `).join("") : `<div class="empty-state">No messages to show.</div>`;
 
+  $("requests").innerHTML = state.apiRequests.length ? state.apiRequests.map((request) => `
+    <article class="request-item">
+      <div class="request-top">
+        <strong>${escapeHtml(request.method)}</strong>
+        <span class="badge ${statusClass(request.status_code)}">${escapeHtml(String(request.status_code))}</span>
+      </div>
+      <div class="request-path" title="${escapeHtml(request.path)}">${escapeHtml(request.path)}</div>
+      <div class="request-meta">
+        <span>${escapeHtml(request.response_time_ms)}ms</span>
+        <span>${escapeHtml(request.client_ip || "-")}</span>
+        <span title="${escapeHtml(fmt(request.created_at))}">${relativeTime(request.created_at)}</span>
+      </div>
+    </article>
+  `).join("") : `<div class="empty-state">No API requests recorded yet.</div>`;
+
   document.querySelectorAll(".filter-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.filter === state.clientFilter);
   });
+}
+
+function statusClass(statusCode) {
+  if (statusCode >= 500) return "status-error";
+  if (statusCode >= 400) return "status-warn";
+  return "status-ok";
 }
 
 function setConnectionLabel(text) {
@@ -176,14 +199,16 @@ async function load() {
     return;
   }
   setConnectionLabel("Loading hub state");
-  const [clients, tasks, messages] = await Promise.all([
+  const [clients, tasks, messages, requests] = await Promise.all([
     api("/api/clients"),
     api("/api/tasks?limit=50"),
-    api("/api/messages?limit=50")
+    api("/api/messages?limit=50"),
+    api("/api/requests?limit=50")
   ]);
   state.clients = clients.clients;
   state.tasks = tasks.tasks;
   state.messages = messages.messages;
+  state.apiRequests = requests.requests;
   setConnectionLabel("Connected");
   render();
   connectSocket();

@@ -23,8 +23,9 @@ flowchart LR
 - 根据在线状态调度指定 client 或随机在线 client。
 - 发送消息任务状态：`queued`、`running`、`succeeded`、`failed`。
 - client 收到消息后上报 hub，支持按 client、sender、chat 查询消息历史。
+- 记录 API 请求历史，包括路径、状态码、来源 IP、耗时和脱敏后的请求体。
 - Webhook 推送 `message.created` 和 `task.updated`。
-- Web 中控实时查看 clients、tasks、messages，并手动发起发送任务。
+- Web 中控实时查看 clients、tasks、messages、API requests，并手动发起发送任务。
 
 ## 本地开发
 
@@ -257,6 +258,15 @@ curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/
 curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/messages?clientId=office-pc-01&limit=100"
 curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/clients/office-pc-01/messages"
 ```
+
+### 查询 API 请求记录
+
+```bash
+curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/requests?limit=100"
+curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/requests?statusCode=500"
+```
+
+API 请求记录包含 `method`、`path`、`status_code`、`client_ip`、`user_agent`、`response_time_ms`、`created_at` 和脱敏后的 `request_body`。
 
 ### 注册 webhook
 

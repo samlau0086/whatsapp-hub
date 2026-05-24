@@ -70,6 +70,26 @@ export function createHub(httpServer) {
         error: payload.error || null,
         completedAt: new Date().toISOString()
       });
+      if (payload.ok && task.type === "send-message") {
+        const message = createMessage({
+          id: `task-${task.id}`,
+          externalId: payload.result?.messageId || null,
+          clientId: task.client_id,
+          direction: "outbound",
+          chatId: payload.result?.chatId || null,
+          sender: task.client_id,
+          recipient: task.target_phone,
+          body: task.payload?.body || "",
+          messageType: "text",
+          payload: {
+            taskId: task.id,
+            result: payload.result || null,
+            metadata: task.payload?.metadata || {}
+          }
+        });
+        io.emit("message:created", message);
+        await dispatchWebhook("message.created", message);
+      }
       io.emit("task:updated", updated);
       await dispatchWebhook("task.updated", updated);
       ack?.({ ok: true, task: updated });

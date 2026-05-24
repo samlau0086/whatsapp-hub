@@ -6,11 +6,13 @@ import { fileURLToPath } from "node:url";
 import { requireWebAdmin } from "./auth.js";
 import { config } from "./config.js";
 import {
+  createApiRequest,
   createTask,
   createWebhook,
   deleteWebhook,
   getClient,
   getTask,
+  listApiRequests,
   listClients,
   listMessages,
   listTasks,
@@ -32,6 +34,26 @@ if (config.trustProxy) {
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 app.use("/", requireWebAdmin, express.static(path.join(__dirname, "public")));
+
+app.use("/api", (req, res, next) => {
+  const startedAt = Date.now();
+  res.on("finish", () => {
+    try {
+      createApiRequest({
+        method: req.method,
+        path: req.originalUrl,
+        statusCode: res.statusCode,
+        clientIp: req.ip,
+        userAgent: req.header("user-agent"),
+        requestBody: sanitizeRequestBody(req.body),
+        responseTimeMs: Date.now() - startedAt
+      });
+    } catch (error) {
+      console.error("failed to record api request", error);
+    }
+  });
+  next();
+});
 
 app.use("/api", (req, res, next) => {
   const token = req.header("x-hub-token") || req.query.token;
@@ -71,6 +93,16 @@ app.get("/api/messages", (req, res) => {
       clientId: req.query.clientId,
       sender: req.query.sender,
       chatId: req.query.chatId,
+      limit: req.query.limit
+    })
+  });
+});
+
+app.get("/api/requests", (req, res) => {
+  res.json({
+    requests: listApiRequests({
+      method: req.query.method,
+      statusCode: req.query.statusCode,
       limit: req.query.limit
     })
   });
@@ -125,6 +157,17 @@ app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: "internal server error" });
 });
+
+function sanitizeRequestBody(body) {
+  if (!body || typeof body !== "object") return body || null;
+  const redacted = { ...body };
+  for (const key of Object.keys(redacted)) {
+    if (/token|password|secret|key/i.test(key)) {
+      redacted[key] = "[redacted]";
+    }
+  }
+  return redacted;
+}
 
 server.listen(config.port, () => {
   console.log(`whatsapp actor hub listening on ${config.publicBaseUrl}`);

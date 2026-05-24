@@ -62,6 +62,20 @@ CREATE TABLE IF NOT EXISTS webhooks (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS api_requests (
+  id TEXT PRIMARY KEY,
+  method TEXT NOT NULL,
+  path TEXT NOT NULL,
+  status_code INTEGER NOT NULL,
+  client_ip TEXT,
+  user_agent TEXT,
+  request_body TEXT,
+  response_time_ms INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_requests_created ON api_requests(created_at DESC);
 `);
 
 const now = () => new Date().toISOString();
@@ -78,6 +92,7 @@ const mapClient = (row) => row && ({ ...row, metadata: parseJson(row.metadata) }
 const mapTask = (row) => row && ({ ...row, payload: parseJson(row.payload), result: parseJson(row.result, null) });
 const mapMessage = (row) => row && ({ ...row, payload: parseJson(row.payload) });
 const mapWebhook = (row) => row && ({ ...row, events: parseJson(row.events, []), enabled: Boolean(row.enabled) });
+const mapApiRequest = (row) => row && ({ ...row, request_body: parseJson(row.request_body, null) });
 
 export function upsertClient({ id, name, phone = null, metadata = {}, status = "online" }) {
   const timestamp = now();
@@ -214,10 +229,29 @@ export function createMessage(message) {
     received_at: timestamp
   };
   db.prepare(`
-    INSERT INTO messages (id, external_id, client_id, direction, chat_id, sender, recipient, body, message_type, payload, created_at, received_at)
+    INSERT OR IGNORE INTO messages (id, external_id, client_id, direction, chat_id, sender, recipient, body, message_type, payload, created_at, received_at)
     VALUES (@id, @external_id, @client_id, @direction, @chat_id, @sender, @recipient, @body, @message_type, @payload, @created_at, @received_at)
   `).run(row);
   return getMessage(row.id);
+}
+
+export function createApiRequest(request) {
+  const row = {
+    id: randomUUID(),
+    method: request.method,
+    path: request.path,
+    status_code: request.statusCode,
+    client_ip: request.clientIp || null,
+    user_agent: request.userAgent || null,
+    request_body: request.requestBody === undefined ? null : json(request.requestBody),
+    response_time_ms: request.responseTimeMs,
+    created_at: now()
+  };
+  db.prepare(`
+    INSERT INTO api_requests (id, method, path, status_code, client_ip, user_agent, request_body, response_time_ms, created_at)
+    VALUES (@id, @method, @path, @status_code, @client_ip, @user_agent, @request_body, @response_time_ms, @created_at)
+  `).run(row);
+  return getApiRequest(row.id);
 }
 
 export function getMessage(id) {
@@ -242,6 +276,26 @@ export function listMessages({ clientId, sender, chatId, limit = 100 } = {}) {
   params.limit = Math.min(Number(limit) || 100, 500);
   const sql = `SELECT * FROM messages ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC LIMIT @limit`;
   return db.prepare(sql).all(params).map(mapMessage);
+}
+
+export function getApiRequest(id) {
+  return mapApiRequest(db.prepare("SELECT * FROM api_requests WHERE id = ?").get(id));
+}
+
+export function listApiRequests({ method, statusCode, limit = 100 } = {}) {
+  const where = [];
+  const params = {};
+  if (method) {
+    where.push("method = @method");
+    params.method = method;
+  }
+  if (statusCode) {
+    where.push("status_code = @statusCode");
+    params.statusCode = Number(statusCode);
+  }
+  params.limit = Math.min(Number(limit) || 100, 500);
+  const sql = `SELECT * FROM api_requests ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC LIMIT @limit`;
+  return db.prepare(sql).all(params).map(mapApiRequest);
 }
 
 export function createWebhook({ url, events = ["message.created", "task.updated"], secret = null }) {
