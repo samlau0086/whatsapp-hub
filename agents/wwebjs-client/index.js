@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import path from "node:path";
 import qrcode from "qrcode-terminal";
 import { io } from "socket.io-client";
 import pkg from "whatsapp-web.js";
@@ -12,6 +13,8 @@ const config = {
   token: process.env.CLIENT_TOKEN || process.env.HUB_API_TOKEN || "dev-token",
   clientId: process.env.CLIENT_ID || "client-main",
   clientName: process.env.CLIENT_NAME || "Main WhatsApp Client",
+  authDataPath: path.resolve(process.env.WWEBJS_AUTH_DATA_PATH || ".wwebjs_auth"),
+  cachePath: path.resolve(process.env.WWEBJS_CACHE_PATH || ".wwebjs_cache"),
   headless: process.env.PUPPETEER_HEADLESS !== "false"
 };
 
@@ -22,12 +25,22 @@ const socket = io(config.hubUrl, {
 });
 
 const whatsapp = new Client({
-  authStrategy: new LocalAuth({ clientId: config.clientId }),
+  authStrategy: new LocalAuth({
+    clientId: config.clientId,
+    dataPath: config.authDataPath
+  }),
   puppeteer: {
     headless: config.headless,
     args: ["--no-sandbox", "--disable-setuid-sandbox"]
+  },
+  webVersionCache: {
+    type: "local",
+    path: config.cachePath
   }
 });
+
+console.log(`auth data path: ${config.authDataPath}`);
+console.log(`web cache path: ${config.cachePath}`);
 
 function emitHello(status = "online") {
   socket.emit("client:hello", {

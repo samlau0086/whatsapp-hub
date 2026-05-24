@@ -171,6 +171,8 @@ HUB_URL=https://ws.geekmt.com
 CLIENT_ID=office-pc-01
 CLIENT_NAME=Office PC 01
 CLIENT_TOKEN=replace-with-the-same-value-as-HUB_API_TOKEN
+WWEBJS_AUTH_DATA_PATH=./.wwebjs_auth
+WWEBJS_CACHE_PATH=./.wwebjs_cache
 PUPPETEER_HEADLESS=false
 ```
 
@@ -180,6 +182,8 @@ PUPPETEER_HEADLESS=false
 - `CLIENT_ID`: 当前内网电脑的唯一 ID。每台电脑必须不同，例如 `office-pc-01`、`store-pc-02`。
 - `CLIENT_NAME`: Web 中控显示名称。
 - `CLIENT_TOKEN`: 必须等于 VPS Hub 的 `HUB_API_TOKEN`。
+- `WWEBJS_AUTH_DATA_PATH`: WhatsApp Web 登录态保存目录。必须持久化，不能每次启动换目录或删除。
+- `WWEBJS_CACHE_PATH`: WhatsApp Web 版本缓存目录。
 - `PUPPETEER_HEADLESS`: 首次调试建议 `false`，稳定后可改为 `true`。
 
 启动 agent：
@@ -189,6 +193,26 @@ npm run agent
 ```
 
 首次运行会在终端显示二维码，用手机 WhatsApp 扫码登录。扫码成功后，Web 中控的 Clients 列表应看到该 `CLIENT_ID` 在线。
+
+### 保留 WhatsApp 登录态
+
+Agent 使用 `whatsapp-web.js` 的 `LocalAuth` 保存登录态。默认保存到项目目录下：
+
+```text
+.wwebjs_auth/
+.wwebjs_cache/
+```
+
+只要这两个目录保留、`CLIENT_ID` 不变、启动用户有读写权限，下一次启动通常不需要重新扫码。
+
+如果你用 PM2、Windows 任务计划、服务管理器或从不同目录启动 agent，建议使用绝对路径：
+
+```bash
+WWEBJS_AUTH_DATA_PATH=C:/whatsapp-hub-data/auth
+WWEBJS_CACHE_PATH=C:/whatsapp-hub-data/cache
+```
+
+不要把这些目录放进临时目录，也不要在更新代码时删除它们。每台内网电脑可以有自己的保存目录；同一台电脑上多个 client 也必须使用不同的 `CLIENT_ID`。
 
 ### Windows 持续运行
 
@@ -207,7 +231,11 @@ pm2 start agents/wwebjs-client/index.js --name whatsapp-agent-office-pc-01
 pm2 save
 ```
 
-如果使用 PM2，请确保运行命令的目录里存在 `.env`，并且该 Windows 用户有权限保存 `whatsapp-web.js` 的登录会话目录。
+如果使用 PM2，请确保运行命令的目录里存在 `.env`，并且该 Windows 用户有权限读写 `WWEBJS_AUTH_DATA_PATH` 和 `WWEBJS_CACHE_PATH`。也可以显式指定工作目录：
+
+```powershell
+pm2 start agents/wwebjs-client/index.js --name whatsapp-agent-office-pc-01 --cwd C:\path\to\whatsapp-hub
+```
 
 ### 测试连接
 
@@ -227,7 +255,7 @@ curl -H "x-hub-token: replace-with-the-same-value-as-HUB_API_TOKEN" https://ws.g
 
 - 每台内网电脑使用不同的 `CLIENT_ID`，否则后上线的连接会覆盖前一个同 ID client。
 - 不要在 VPS 容器里运行 `npm run agent`。VPS 只运行 Hub，agent 应运行在实际登录 WhatsApp 的内网电脑上。
-- 如果 WhatsApp 退出登录或二维码过期，重新运行 agent 并扫码。
+- 如果 WhatsApp 退出登录或二维码过期，重新运行 agent 并扫码。若每次都要求扫码，优先检查 `WWEBJS_AUTH_DATA_PATH` 是否固定、目录是否被删除、`CLIENT_ID` 是否变化、启动用户是否有权限。
 - `whatsapp-web.js` 使用非官方 WhatsApp Web 接口，请控制发送频率，避免异常批量行为。
 
 ## API
@@ -668,6 +696,8 @@ Agent:
 - `CLIENT_ID`: client 唯一 ID。
 - `CLIENT_NAME`: 中控显示名称。
 - `CLIENT_TOKEN`: 连接 hub 的 token，应与 `HUB_API_TOKEN` 一致。
+- `WWEBJS_AUTH_DATA_PATH`: WhatsApp Web 登录态保存目录。
+- `WWEBJS_CACHE_PATH`: WhatsApp Web 缓存目录。
 - `PUPPETEER_HEADLESS`: 是否无头运行 Chromium。
 
 ## 后续可扩展点
