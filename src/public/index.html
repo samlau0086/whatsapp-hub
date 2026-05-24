@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WhatsApp Actor Hub</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>WhatsApp Actor Hub</h1>
+        <p>Clients, tasks, messages, and webhook delivery.</p>
+      </div>
+      <form id="token-form" class="token-form">
+        <input id="token-input" type="password" placeholder="Hub API token" autocomplete="current-password" />
+        <button type="submit">Connect</button>
+      </form>
+    </header>
+
+    <main class="layout">
+      <section class="panel stats">
+        <article><strong id="stat-online">0</strong><span>Online</span></article>
+        <article><strong id="stat-clients">0</strong><span>Clients</span></article>
+        <article><strong id="stat-running">0</strong><span>Running</span></article>
+        <article><strong id="stat-messages">0</strong><span>Messages</span></article>
+      </section>
+
+      <section class="panel send-panel">
+        <h2>Send Task</h2>
+        <form id="send-form" class="send-form">
+          <select id="send-client">
+            <option value="">Random online client</option>
+          </select>
+          <input id="send-to" placeholder="Phone, e.g. 15551234567" />
+          <textarea id="send-body" placeholder="Message body"></textarea>
+          <button type="submit">Dispatch</button>
+        </form>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="panel-head">
+          <h2>Clients</h2>
+          <button id="refresh">Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Status</th><th>Last seen</th></tr></thead>
+            <tbody id="clients"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel table-panel">
+        <h2>Tasks</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>Client</th><th>To</th><th>Status</th><th>Updated</th></tr></thead>
+            <tbody id="tasks"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel feed-panel">
+        <h2>Messages</h2>
+        <div id="messages" class="feed"></div>
+      </section>
+    </main>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
