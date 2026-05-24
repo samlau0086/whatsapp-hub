@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Login - WhatsApp Actor Hub</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="login-page">
+    <main class="login-shell">
+      <section class="login-panel">
+        <div class="brand login-brand">
+          <div class="brand-mark">WA</div>
+          <div>
+            <h1>WhatsApp Actor Hub</h1>
+            <p>Sign in to continue</p>
+          </div>
+        </div>
+
+        <form id="login-form" class="login-form">
+          <label>
+            <span>Username</span>
+            <input id="login-username" autocomplete="username" autofocus />
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="login-password" type="password" autocomplete="current-password" />
+          </label>
+          <button type="submit">Sign in</button>
+          <p id="login-error" class="form-error"></p>
+        </form>
+      </section>
+    </main>
+
+    <script>
+      document.getElementById("login-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const error = document.getElementById("login-error");
+        error.textContent = "";
+        const res = await fetch("/auth/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            username: document.getElementById("login-username").value.trim(),
+            password: document.getElementById("login-password").value
+          })
+        });
+        if (!res.ok) {
+          error.textContent = "Invalid username or password.";
+          return;
+        }
+        window.location.href = "/";
+      });
+    </script>
+  </body>
+</html>

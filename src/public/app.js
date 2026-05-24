@@ -1,11 +1,12 @@
 const state = {
-  token: localStorage.getItem("hubToken") || "",
   language: localStorage.getItem("hubLanguage") || "en",
+  user: null,
+  roles: {},
   clients: [],
   tasks: [],
   messages: [],
   apiRequests: [],
-  socket: null,
+  users: [],
   clientFilter: "all",
   selectedClientId: ""
 };
@@ -15,12 +16,8 @@ const fmt = (value) => value ? new Date(value).toLocaleString() : "-";
 
 const i18n = {
   en: {
-    disconnected: "Disconnected",
-    enterToken: "Enter API token to connect",
     loading: "Loading hub state",
-    connected: "Connected",
-    realtimeConnected: "Realtime connected",
-    realtimeDisconnected: "Realtime disconnected",
+    connected: "Signed in",
     connectionFailed: "Connection failed",
     metricOnline: "Online clients",
     metricClients: "Total clients",
@@ -39,16 +36,20 @@ const i18n = {
     taskTimeline: "Task Timeline",
     messageStream: "Message Stream",
     apiRequests: "API Requests",
+    logout: "Logout",
+    userManagement: "User Management",
+    rolesAccess: "Roles and access control",
+    createUser: "Create user",
     randomClient: "Random online client",
     noClientSelected: "No client selected",
     noClients: "No clients match this filter.",
     noTasks: "No tasks to show.",
     noMessages: "No messages to show.",
     noRequests: "No API requests recorded yet.",
+    noUsers: "No users.",
     noPhone: "No phone",
     latestTasks: "Latest 50 tasks",
     latestMessages: "Latest 50 messages",
-    latestRequests: "Latest 50 API calls",
     recentApiCalls: "{count} recent API calls",
     onlineSummary: "{online} online / {total} total",
     filteredBy: "Filtered by {id}",
@@ -59,16 +60,16 @@ const i18n = {
     clientLabel: "Client: {value}",
     toLabel: "To: {value}",
     chatLabel: "Chat: {value}",
-    tokenPlaceholder: "Hub API token",
-    messagePlaceholder: "Type message body"
+    messagePlaceholder: "Type message body",
+    usernamePlaceholder: "Username",
+    displayNamePlaceholder: "Display name",
+    passwordPlaceholder: "Password",
+    userCreated: "User created",
+    userDeleted: "User deleted"
   },
   zh: {
-    disconnected: "未连接",
-    enterToken: "输入 API Token 后连接",
     loading: "正在加载 Hub 状态",
-    connected: "已连接",
-    realtimeConnected: "实时连接已建立",
-    realtimeDisconnected: "实时连接已断开",
+    connected: "已登录",
     connectionFailed: "连接失败",
     metricOnline: "在线客户端",
     metricClients: "客户端总数",
@@ -87,16 +88,20 @@ const i18n = {
     taskTimeline: "任务时间线",
     messageStream: "消息流",
     apiRequests: "API 请求记录",
+    logout: "退出",
+    userManagement: "用户管理",
+    rolesAccess: "角色和访问控制",
+    createUser: "创建用户",
     randomClient: "随机在线客户端",
     noClientSelected: "未选择客户端",
     noClients: "没有符合筛选条件的客户端。",
     noTasks: "暂无任务。",
     noMessages: "暂无消息。",
     noRequests: "暂无 API 请求记录。",
+    noUsers: "暂无用户。",
     noPhone: "无手机号",
     latestTasks: "最近 50 条任务",
     latestMessages: "最近 50 条消息",
-    latestRequests: "最近 50 条 API 调用",
     recentApiCalls: "最近 {count} 条 API 调用",
     onlineSummary: "{online} 在线 / 共 {total}",
     filteredBy: "按 {id} 筛选",
@@ -107,8 +112,12 @@ const i18n = {
     clientLabel: "客户端：{value}",
     toLabel: "发送至：{value}",
     chatLabel: "会话：{value}",
-    tokenPlaceholder: "Hub API Token",
-    messagePlaceholder: "输入消息内容"
+    messagePlaceholder: "输入消息内容",
+    usernamePlaceholder: "用户名",
+    displayNamePlaceholder: "显示名称",
+    passwordPlaceholder: "密码",
+    userCreated: "用户已创建",
+    userDeleted: "用户已删除"
   }
 };
 
@@ -120,9 +129,9 @@ function t(key, values = {}) {
 function api(path, options = {}) {
   return fetch(path, {
     ...options,
+    credentials: "same-origin",
     headers: {
       "content-type": "application/json",
-      "x-hub-token": state.token,
       ...(options.headers || {})
     }
   }).then(async (res) => {
@@ -163,28 +172,26 @@ function relativeTime(value) {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+function can(permission) {
+  return state.user?.permissions?.includes(permission);
+}
+
 function selectedClient() {
   return state.clients.find((client) => client.id === state.selectedClientId);
 }
 
 function filteredClients() {
-  if (state.clientFilter === "online") {
-    return state.clients.filter((client) => client.status === "online");
-  }
-  if (state.clientFilter === "offline") {
-    return state.clients.filter((client) => client.status !== "online");
-  }
+  if (state.clientFilter === "online") return state.clients.filter((client) => client.status === "online");
+  if (state.clientFilter === "offline") return state.clients.filter((client) => client.status !== "online");
   return state.clients;
 }
 
 function scopedTasks() {
-  if (!state.selectedClientId) return state.tasks;
-  return state.tasks.filter((task) => task.client_id === state.selectedClientId);
+  return state.selectedClientId ? state.tasks.filter((task) => task.client_id === state.selectedClientId) : state.tasks;
 }
 
 function scopedMessages() {
-  if (!state.selectedClientId) return state.messages;
-  return state.messages.filter((message) => message.client_id === state.selectedClientId);
+  return state.selectedClientId ? state.messages.filter((message) => message.client_id === state.selectedClientId) : state.messages;
 }
 
 function render() {
@@ -195,11 +202,13 @@ function render() {
   const tasks = scopedTasks();
   const messages = scopedMessages();
 
+  applyLanguage();
+  $("current-user").textContent = state.user?.display_name || state.user?.username || "-";
+  $("current-role").textContent = state.user?.role || "-";
   $("stat-online").textContent = onlineCount;
   $("stat-clients").textContent = state.clients.length;
   $("stat-running").textContent = runningCount;
   $("stat-messages").textContent = state.messages.length;
-  applyLanguage();
   $("client-summary").textContent = t("onlineSummary", { online: onlineCount, total: state.clients.length });
   $("task-summary").textContent = state.selectedClientId ? t("filteredBy", { id: state.selectedClientId }) : t("latestTasks");
   $("message-summary").textContent = state.selectedClientId ? t("filteredBy", { id: state.selectedClientId }) : t("latestMessages");
@@ -275,6 +284,19 @@ function render() {
     </article>
   `).join("") : `<div class="empty-state">${escapeHtml(t("noRequests"))}</div>`;
 
+  $("users-panel").hidden = !can("users:manage");
+  $("users").innerHTML = state.users.length ? state.users.map((user) => `
+    <article class="user-item">
+      <div>
+        <strong>${escapeHtml(user.display_name || user.username)}</strong>
+        <span>${escapeHtml(user.username)} / ${escapeHtml(user.role)}</span>
+      </div>
+      <span class="badge ${user.enabled ? "status-ok" : "status-warn"}">${user.enabled ? "enabled" : "disabled"}</span>
+      <button class="ghost-button" type="button" data-delete-user="${escapeHtml(user.id)}">Delete</button>
+    </article>
+  `).join("") : `<div class="empty-state">${escapeHtml(t("noUsers"))}</div>`;
+
+  $("send-form").querySelector("button[type='submit']").disabled = !can("tasks:send");
   document.querySelectorAll(".filter-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.filter === state.clientFilter);
   });
@@ -285,8 +307,10 @@ function applyLanguage() {
   document.querySelectorAll("[data-i18n]").forEach((node) => {
     node.textContent = t(node.dataset.i18n);
   });
-  $("token-input").placeholder = t("tokenPlaceholder");
   $("send-body").placeholder = t("messagePlaceholder");
+  $("user-username").placeholder = t("usernamePlaceholder");
+  $("user-display-name").placeholder = t("displayNamePlaceholder");
+  $("user-password").placeholder = t("passwordPlaceholder");
   $("lang-en").classList.toggle("active", state.language === "en");
   $("lang-zh").classList.toggle("active", state.language === "zh");
 }
@@ -310,58 +334,67 @@ function showToast(message) {
 }
 
 async function load() {
-  if (!state.token) {
-    setConnectionLabel(t("enterToken"));
-    render();
-    return;
-  }
   setConnectionLabel(t("loading"));
-  const [clients, tasks, messages, requests] = await Promise.all([
-    api("/api/clients"),
-    api("/api/tasks?limit=50"),
-    api("/api/messages?limit=50"),
-    api("/api/requests?limit=50")
+  const me = await api("/admin/api/me").catch((error) => {
+    if (error.message === "unauthenticated") window.location.href = "/login";
+    throw error;
+  });
+  state.user = me.user;
+  state.roles = me.roles;
+
+  const [clients, tasks, messages, requests, users] = await Promise.all([
+    can("clients:read") ? api("/admin/api/clients") : Promise.resolve({ clients: [] }),
+    can("tasks:read") ? api("/admin/api/tasks?limit=50") : Promise.resolve({ tasks: [] }),
+    can("messages:read") ? api("/admin/api/messages?limit=50") : Promise.resolve({ messages: [] }),
+    can("requests:read") ? api("/admin/api/requests?limit=50") : Promise.resolve({ requests: [] }),
+    can("users:manage") ? api("/admin/api/users") : Promise.resolve({ users: [] })
   ]);
   state.clients = clients.clients;
   state.tasks = tasks.tasks;
   state.messages = messages.messages;
   state.apiRequests = requests.requests;
+  state.users = users.users;
   setConnectionLabel(t("connected"));
   render();
-  connectSocket();
 }
 
-function connectSocket() {
-  if (state.socket?.connected) return;
-  state.socket?.disconnect();
-  state.socket = io({ auth: { token: state.token } });
-  state.socket.on("connect", () => setConnectionLabel(t("realtimeConnected")));
-  state.socket.on("disconnect", () => setConnectionLabel(t("realtimeDisconnected")));
-  state.socket.on("client:updated", (client) => {
-    state.clients = [client, ...state.clients.filter((item) => item.id !== client.id)];
-    render();
-  });
-  state.socket.on("task:updated", (task) => {
-    state.tasks = [task, ...state.tasks.filter((item) => item.id !== task.id)].slice(0, 50);
-    render();
-  });
-  state.socket.on("message:created", (message) => {
-    state.messages = [message, ...state.messages.filter((item) => item.id !== message.id)].slice(0, 50);
-    render();
-  });
+async function logout() {
+  await api("/auth/logout", { method: "POST" }).catch(() => {});
+  window.location.href = "/login";
+}
+
+async function createUser(event) {
+  event.preventDefault();
+  const payload = {
+    username: $("user-username").value.trim(),
+    displayName: $("user-display-name").value.trim(),
+    password: $("user-password").value,
+    role: $("user-role").value,
+    enabled: true
+  };
+  await api("/admin/api/users", { method: "POST", body: JSON.stringify(payload) })
+    .then(async () => {
+      $("user-form").reset();
+      state.users = (await api("/admin/api/users")).users;
+      showToast(t("userCreated"));
+      render();
+    })
+    .catch((error) => showToast(error.message));
 }
 
 function bindEvents() {
-  $("token-input").value = state.token;
-
-  $("token-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    state.token = $("token-input").value.trim();
-    localStorage.setItem("hubToken", state.token);
-    await load().catch((error) => {
-      setConnectionLabel(t("connectionFailed"));
-      showToast(error.message);
-    });
+  $("logout").addEventListener("click", logout);
+  $("user-form").addEventListener("submit", createUser);
+  $("users").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-delete-user]");
+    if (!button) return;
+    await api(`/admin/api/users/${button.dataset.deleteUser}`, { method: "DELETE" })
+      .then(async () => {
+        state.users = (await api("/admin/api/users")).users;
+        showToast(t("userDeleted"));
+        render();
+      })
+      .catch((error) => showToast(error.message));
   });
 
   $("refresh").addEventListener("click", () => {
@@ -403,7 +436,7 @@ function bindEvents() {
       to: $("send-to").value.trim(),
       body: $("send-body").value
     };
-    await api("/api/tasks/send-message", { method: "POST", body: JSON.stringify(payload) })
+    await api("/admin/api/tasks/send-message", { method: "POST", body: JSON.stringify(payload) })
       .then(({ task }) => {
         state.tasks = [task, ...state.tasks.filter((item) => item.id !== task.id)];
         $("send-body").value = "";
@@ -426,4 +459,7 @@ function setLanguage(language) {
 bindEvents();
 applyLanguage();
 render();
-load().catch(() => setConnectionLabel(t("connectionFailed")));
+load().catch((error) => {
+  setConnectionLabel(t("connectionFailed"));
+  showToast(error.message);
+});

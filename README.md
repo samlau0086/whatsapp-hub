@@ -26,6 +26,7 @@ flowchart LR
 - 记录 API 请求历史，包括路径、状态码、来源 IP、耗时和脱敏后的请求体。
 - Webhook 推送 `message.created` 和 `task.updated`。
 - Web 中控实时查看 clients、tasks、messages、API requests，并手动发起发送任务。
+- Web 中控使用登录页和 session cookie，支持多用户、角色和权限管理。
 
 ## 本地开发
 
@@ -91,6 +92,25 @@ HOST_PORT=3000
 VPS 需要提前安装 Docker 和 Docker Compose，并允许上述 SSH 用户访问 Docker。首次部署前确认目录存在权限正常，或让 workflow 自动创建 `VPS_DEPLOY_PATH`。Actions 会把该 secret 写成 VPS 上的 `hub.env`，并只把 `HOST_BIND_ADDRESS`、`HOST_PORT`、`PORT` 提供给 Compose 做端口插值，因此 `HUB_API_TOKEN` 里可以包含 `$`。
 
 VPS 镜像只安装 Hub 运行所需依赖，不安装 `whatsapp-web.js` 和 Puppeteer。内网电脑运行 agent 时使用普通 `npm install`，会安装这些 optional dependencies。
+
+## Web 登录和权限
+
+首次启动时，如果数据库里还没有用户，Hub 会使用环境变量创建初始管理员：
+
+```bash
+WEB_ADMIN_USERNAME=admin
+WEB_ADMIN_PASSWORD=replace-with-a-long-random-admin-password
+```
+
+之后登录 `https://hub.example.com/login`，可以在 Web UI 的 User Management 面板里创建和删除用户。环境变量只用于首次初始化；已经创建用户后，修改环境变量不会覆盖数据库里的用户密码。
+
+内置角色：
+
+- `admin`: 查看所有数据、发送任务、删除 clients、管理 users。
+- `operator`: 查看 clients/tasks/messages/API requests，并发送任务。
+- `viewer`: 只读查看 clients/tasks/messages。
+
+外部业务系统和内网 WhatsApp client agent 不使用 Web 用户登录，仍然使用 `HUB_API_TOKEN` 调用 `/api/*` 和连接 Socket.IO。
 
 Nginx 反向代理示例，重点是保留 WebSocket upgrade：
 
@@ -286,8 +306,8 @@ Hub:
 - `HOST_PORT`: VPS 绑定端口。如果 `3000` 已被占用，可以改成 `3001`，并让 Nginx 反代到对应端口。
 - `DATABASE_PATH`: SQLite 文件位置，默认 `./data/hub.sqlite`。
 - `HUB_API_TOKEN`: API 和 Socket.IO 认证 token。
-- `WEB_ADMIN_USERNAME`: Web 中控访问用户名。不设置时不启用 Web 登录保护。
-- `WEB_ADMIN_PASSWORD`: Web 中控访问密码。不设置时不启用 Web 登录保护。
+- `WEB_ADMIN_USERNAME`: 首次初始化 Web 管理员用户名。
+- `WEB_ADMIN_PASSWORD`: 首次初始化 Web 管理员密码。
 - `PUBLIC_BASE_URL`: Hub 对外访问地址，例如 `https://hub.example.com`。
 - `TRUST_PROXY`: 使用 Nginx/Caddy 等反向代理时设为 `true`。
 - `CLIENT_OFFLINE_AFTER_MS`: 心跳超时后标记离线，默认 45 秒。

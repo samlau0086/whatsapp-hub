@@ -1,36 +1,151 @@
 import crypto from "node:crypto";
-import { config } from "./config.js";
+import {
+  createSession,
+  deleteSession,
+  getSession,
+  getUserByUsername,
+  touchSession
+} from "./db.js";
 
-export function requireWebAdmin(req, res, next) {
-  if (req.path === "/health" || req.path.startsWith("/api/") || req.path.startsWith("/socket.io/")) {
-    return next();
+const SESSION_COOKIE = "wah_session";
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+
+export const roles = {
+  admin: [
+    "clients:read",
+    "clients:delete",
+    "tasks:read",
+    "tasks:send",
+    "messages:read",
+    "requests:read",
+    "webhooks:manage",
+    "users:manage"
+  ],
+  operator: [
+    "clients:read",
+    "tasks:read",
+    "tasks:send",
+    "messages:read",
+    "requests:read"
+  ],
+  viewer: [
+    "clients:read",
+    "tasks:read",
+    "messages:read"
+  ]
+};
+
+export function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+  const hash = crypto.pbkdf2Sync(String(password), salt, 310_000, 32, "sha256").toString("hex");
+  return `pbkdf2_sha256$${salt}$${hash}`;
+}
+
+export function verifyPassword(password, stored) {
+  const [scheme, salt, expected] = String(stored || "").split("$");
+  if (scheme !== "pbkdf2_sha256" || !salt || !expected) return false;
+  const actual = hashPassword(password, salt).split("$")[2];
+  return safeEqual(actual, expected);
+}
+
+export function requireWebSession(req, res, next) {
+  const session = readSession(req);
+  if (!session) {
+    if (req.path.startsWith("/admin/api/")) {
+      return res.status(401).json({ error: "unauthenticated" });
+    }
+    return res.redirect("/login");
   }
-
-  if (!config.webAdminUsername || !config.webAdminPassword) {
-    return next();
-  }
-
-  const header = req.header("authorization") || "";
-  const [scheme, encoded] = header.split(" ");
-  if (scheme !== "Basic" || !encoded) {
-    return challenge(res);
-  }
-
-  const decoded = Buffer.from(encoded, "base64").toString("utf8");
-  const separator = decoded.indexOf(":");
-  const username = separator >= 0 ? decoded.slice(0, separator) : "";
-  const password = separator >= 0 ? decoded.slice(separator + 1) : "";
-
-  if (!safeEqual(username, config.webAdminUsername) || !safeEqual(password, config.webAdminPassword)) {
-    return challenge(res);
-  }
-
+  req.user = session.user;
+  req.session = session;
   next();
 }
 
-function challenge(res) {
-  res.set("www-authenticate", 'Basic realm="WhatsApp Actor Hub"');
-  return res.status(401).send("Authentication required");
+export function requirePermission(permission) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: "unauthenticated" });
+    if (!hasPermission(req.user, permission)) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    next();
+  };
+}
+
+export function hasPermission(user, permission) {
+  return roles[user.role]?.includes(permission) || false;
+}
+
+export function loginUser(username, password, req) {
+  const user = getUserByUsername(username);
+  if (!user || !user.enabled || !verifyPassword(password, user.password_hash)) {
+    return null;
+  }
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
+  createSession({
+    token,
+    userId: user.id,
+    expiresAt,
+    ip: req.ip,
+    userAgent: req.header("user-agent")
+  });
+  return { token, user: publicUser(user), expiresAt };
+}
+
+export function logoutUser(req, res) {
+  const token = getCookie(req, SESSION_COOKIE);
+  if (token) deleteSession(token);
+  clearSessionCookie(res);
+}
+
+export function setSessionCookie(res, token, expiresAt) {
+  res.cookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: false,
+    expires: new Date(expiresAt),
+    path: "/"
+  });
+}
+
+export function clearSessionCookie(res) {
+  res.clearCookie(SESSION_COOKIE, { path: "/" });
+}
+
+export function publicUser(user) {
+  if (!user) return null;
+  return {
+    id: user.id,
+    username: user.username,
+    display_name: user.display_name,
+    role: user.role,
+    enabled: Boolean(user.enabled),
+    created_at: user.created_at,
+    updated_at: user.updated_at,
+    last_login_at: user.last_login_at,
+    permissions: roles[user.role] || []
+  };
+}
+
+function readSession(req) {
+  const token = getCookie(req, SESSION_COOKIE);
+  if (!token) return null;
+  const session = getSession(token);
+  if (!session || !session.user || new Date(session.expires_at).getTime() < Date.now()) {
+    deleteSession(token);
+    return null;
+  }
+  touchSession(token);
+  return { ...session, user: publicUser(session.user) };
+}
+
+function getCookie(req, name) {
+  const header = req.header("cookie") || "";
+  const cookies = Object.fromEntries(header.split(";").map((part) => {
+    const index = part.indexOf("=");
+    if (index < 0) return ["", ""];
+    return [part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1).trim())];
+  }));
+  return cookies[name] || "";
 }
 
 function safeEqual(a, b) {

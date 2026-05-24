@@ -21,10 +21,13 @@
         <button id="lang-zh" type="button" class="language-button">中文</button>
       </div>
 
-      <form id="token-form" class="token-form">
-        <input id="token-input" type="password" placeholder="Hub API token" autocomplete="current-password" />
-        <button type="submit">Connect</button>
-      </form>
+      <div class="user-menu">
+        <div>
+          <strong id="current-user">-</strong>
+          <span id="current-role">-</span>
+        </div>
+        <button id="logout" class="ghost-button" type="button" data-i18n="logout">Logout</button>
+      </div>
     </header>
 
     <main class="dashboard">
@@ -126,13 +129,33 @@
             </div>
             <div id="requests" class="request-list"></div>
           </section>
+
+          <section id="users-panel" class="panel-card">
+            <div class="section-head">
+              <div>
+                <h2 data-i18n="userManagement">User Management</h2>
+                <p data-i18n="rolesAccess">Roles and access control</p>
+              </div>
+            </div>
+            <form id="user-form" class="user-form">
+              <input id="user-username" placeholder="Username" />
+              <input id="user-display-name" placeholder="Display name" />
+              <input id="user-password" type="password" placeholder="Password" />
+              <select id="user-role">
+                <option value="viewer">viewer</option>
+                <option value="operator">operator</option>
+                <option value="admin">admin</option>
+              </select>
+              <button type="submit" data-i18n="createUser">Create user</button>
+            </form>
+            <div id="users" class="user-list"></div>
+          </section>
         </section>
       </section>
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/socket.io/socket.io.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

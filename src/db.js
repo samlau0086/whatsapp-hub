@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { pbkdf2Sync, randomUUID } from "node:crypto";
 import { config } from "./config.js";
 
 fs.mkdirSync(path.dirname(config.databasePath), { recursive: true });
@@ -76,6 +76,32 @@ CREATE TABLE IF NOT EXISTS api_requests (
 );
 
 CREATE INDEX IF NOT EXISTS idx_api_requests_created ON api_requests(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_login_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS web_sessions (
+  token TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  ip TEXT,
+  user_agent TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_web_sessions_user ON web_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_web_sessions_expires ON web_sessions(expires_at);
 `);
 
 const now = () => new Date().toISOString();
@@ -93,6 +119,9 @@ const mapTask = (row) => row && ({ ...row, payload: parseJson(row.payload), resu
 const mapMessage = (row) => row && ({ ...row, payload: parseJson(row.payload) });
 const mapWebhook = (row) => row && ({ ...row, events: parseJson(row.events, []), enabled: Boolean(row.enabled) });
 const mapApiRequest = (row) => row && ({ ...row, request_body: parseJson(row.request_body, null) });
+const mapUser = (row) => row && ({ ...row, enabled: Boolean(row.enabled) });
+
+seedAdminUser();
 
 export function upsertClient({ id, name, phone = null, metadata = {}, status = "online" }) {
   const timestamp = now();
@@ -318,4 +347,114 @@ export function listWebhooks(eventName) {
     .all()
     .map(mapWebhook)
     .filter((hook) => !eventName || hook.events.includes(eventName) || hook.events.includes("*"));
+}
+
+export function createUser({ username, displayName, passwordHash, role = "viewer", enabled = true }) {
+  const timestamp = now();
+  const row = {
+    id: randomUUID(),
+    username,
+    display_name: displayName || username,
+    password_hash: passwordHash,
+    role,
+    enabled: enabled ? 1 : 0,
+    created_at: timestamp,
+    updated_at: timestamp
+  };
+  db.prepare(`
+    INSERT INTO users (id, username, display_name, password_hash, role, enabled, created_at, updated_at)
+    VALUES (@id, @username, @display_name, @password_hash, @role, @enabled, @created_at, @updated_at)
+  `).run(row);
+  return getUser(row.id);
+}
+
+export function updateUser(id, patch) {
+  const current = getUser(id);
+  if (!current) return null;
+  const next = {
+    id,
+    username: patch.username ?? current.username,
+    display_name: patch.displayName ?? current.display_name,
+    password_hash: patch.passwordHash ?? current.password_hash,
+    role: patch.role ?? current.role,
+    enabled: patch.enabled === undefined ? Number(current.enabled) : (patch.enabled ? 1 : 0),
+    updated_at: now()
+  };
+  db.prepare(`
+    UPDATE users
+    SET username = @username,
+        display_name = @display_name,
+        password_hash = @password_hash,
+        role = @role,
+        enabled = @enabled,
+        updated_at = @updated_at
+    WHERE id = @id
+  `).run(next);
+  return getUser(id);
+}
+
+export function deleteUser(id) {
+  return db.prepare("DELETE FROM users WHERE id = ?").run(id).changes > 0;
+}
+
+export function getUser(id) {
+  return mapUser(db.prepare("SELECT * FROM users WHERE id = ?").get(id));
+}
+
+export function getUserByUsername(username) {
+  return mapUser(db.prepare("SELECT * FROM users WHERE username = ?").get(username));
+}
+
+export function listUsers() {
+  return db.prepare("SELECT * FROM users ORDER BY created_at ASC").all().map(mapUser);
+}
+
+export function markUserLogin(id) {
+  db.prepare("UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?").run(now(), now(), id);
+}
+
+export function createSession({ token, userId, expiresAt, ip, userAgent }) {
+  const timestamp = now();
+  db.prepare(`
+    INSERT INTO web_sessions (token, user_id, ip, user_agent, created_at, updated_at, expires_at)
+    VALUES (@token, @user_id, @ip, @user_agent, @created_at, @updated_at, @expires_at)
+  `).run({
+    token,
+    user_id: userId,
+    ip: ip || null,
+    user_agent: userAgent || null,
+    created_at: timestamp,
+    updated_at: timestamp,
+    expires_at: expiresAt
+  });
+  markUserLogin(userId);
+  return getSession(token);
+}
+
+export function getSession(token) {
+  const session = db.prepare("SELECT * FROM web_sessions WHERE token = ?").get(token);
+  if (!session) return null;
+  return { ...session, user: getUser(session.user_id) };
+}
+
+export function touchSession(token) {
+  db.prepare("UPDATE web_sessions SET updated_at = ? WHERE token = ?").run(now(), token);
+}
+
+export function deleteSession(token) {
+  return db.prepare("DELETE FROM web_sessions WHERE token = ?").run(token).changes > 0;
+}
+
+function seedAdminUser() {
+  const count = db.prepare("SELECT COUNT(*) AS count FROM users").get().count;
+  if (count > 0 || !config.webAdminUsername || !config.webAdminPassword) return;
+  const salt = randomUUID().replace(/-/g, "");
+  const hash = pbkdf2Sync(String(config.webAdminPassword), salt, 310_000, 32, "sha256").toString("hex");
+  createUser({
+    username: config.webAdminUsername,
+    displayName: config.webAdminUsername,
+    passwordHash: `pbkdf2_sha256$${salt}$${hash}`,
+    role: "admin",
+    enabled: true
+  });
 }
