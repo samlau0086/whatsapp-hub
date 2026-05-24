@@ -34,7 +34,7 @@ import {
   setClientStatus,
   updateUser
 } from "./db.js";
-import { chooseClient, createHub } from "./hub.js";
+import { chooseClient, createHub, reconcileClientPresence } from "./hub.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -75,6 +75,7 @@ app.get("/admin/api/me", requireWebSession, (req, res) => {
 });
 
 app.get("/admin/api/clients", requireWebSession, requirePermission("clients:read"), (req, res) => {
+  reconcileClientPresence();
   res.json({ clients: listClients() });
 });
 
@@ -189,6 +190,7 @@ app.get("/health", (req, res) => {
 });
 
 app.get("/api/clients", (req, res) => {
+  reconcileClientPresence();
   res.json({ clients: listClients() });
 });
 

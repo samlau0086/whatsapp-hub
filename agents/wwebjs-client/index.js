@@ -46,7 +46,8 @@ socket.on("connect", () => {
   emitHello();
 });
 
-socket.on("task:send-message", async (task) => {
+socket.on("task:send-message", async (task, ack) => {
+  ack?.({ accepted: true });
   try {
     const { to, body } = task.payload;
     const chatId = to.includes("@c.us") ? to : `${to.replace(/\D/g, "")}@c.us`;
