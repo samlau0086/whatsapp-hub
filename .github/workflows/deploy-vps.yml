@@ -45,7 +45,7 @@ jobs:
             --exclude='.env' \
             --exclude='.wwebjs_auth' \
             --exclude='.wwebjs_cache' \
-            -czf whatsapp-hub.tgz .
+            -czf "$RUNNER_TEMP/whatsapp-hub.tgz" .
 
       - name: Configure SSH
         run: |
@@ -64,7 +64,7 @@ jobs:
       - name: Upload files
         run: |
           set -eu
-          scp -i ~/.ssh/deploy_key -P "$VPS_PORT" whatsapp-hub.tgz "$VPS_USER@$VPS_HOST:$VPS_DEPLOY_PATH/.deploy-whatsapp-hub.tgz"
+          scp -i ~/.ssh/deploy_key -P "$VPS_PORT" "$RUNNER_TEMP/whatsapp-hub.tgz" "$VPS_USER@$VPS_HOST:$VPS_DEPLOY_PATH/.deploy-whatsapp-hub.tgz"
           if [ -n "$VPS_ENV_FILE" ]; then
             printf '%s\n' "$VPS_ENV_FILE" > .env.production
             scp -i ~/.ssh/deploy_key -P "$VPS_PORT" .env.production "$VPS_USER@$VPS_HOST:$VPS_DEPLOY_PATH/.env"
