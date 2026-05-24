@@ -1,5 +1,6 @@
 const state = {
   token: localStorage.getItem("hubToken") || "",
+  language: localStorage.getItem("hubLanguage") || "en",
   clients: [],
   tasks: [],
   messages: [],
@@ -11,6 +12,110 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 const fmt = (value) => value ? new Date(value).toLocaleString() : "-";
+
+const i18n = {
+  en: {
+    disconnected: "Disconnected",
+    enterToken: "Enter API token to connect",
+    loading: "Loading hub state",
+    connected: "Connected",
+    realtimeConnected: "Realtime connected",
+    realtimeDisconnected: "Realtime disconnected",
+    connectionFailed: "Connection failed",
+    metricOnline: "Online clients",
+    metricClients: "Total clients",
+    metricRunning: "Running tasks",
+    metricMessages: "Messages cached",
+    clients: "Clients",
+    refresh: "Refresh",
+    all: "All",
+    online: "Online",
+    offline: "Offline",
+    sendMessage: "Send Message",
+    client: "Client",
+    phone: "Phone",
+    message: "Message",
+    dispatchTask: "Dispatch task",
+    taskTimeline: "Task Timeline",
+    messageStream: "Message Stream",
+    apiRequests: "API Requests",
+    randomClient: "Random online client",
+    noClientSelected: "No client selected",
+    noClients: "No clients match this filter.",
+    noTasks: "No tasks to show.",
+    noMessages: "No messages to show.",
+    noRequests: "No API requests recorded yet.",
+    noPhone: "No phone",
+    latestTasks: "Latest 50 tasks",
+    latestMessages: "Latest 50 messages",
+    latestRequests: "Latest 50 API calls",
+    recentApiCalls: "{count} recent API calls",
+    onlineSummary: "{online} online / {total} total",
+    filteredBy: "Filtered by {id}",
+    dispatchingWith: "Dispatching with {name}",
+    hubRefreshed: "Hub state refreshed",
+    taskDispatched: "Task dispatched",
+    taskLabel: "Task {id}",
+    clientLabel: "Client: {value}",
+    toLabel: "To: {value}",
+    chatLabel: "Chat: {value}",
+    tokenPlaceholder: "Hub API token",
+    messagePlaceholder: "Type message body"
+  },
+  zh: {
+    disconnected: "未连接",
+    enterToken: "输入 API Token 后连接",
+    loading: "正在加载 Hub 状态",
+    connected: "已连接",
+    realtimeConnected: "实时连接已建立",
+    realtimeDisconnected: "实时连接已断开",
+    connectionFailed: "连接失败",
+    metricOnline: "在线客户端",
+    metricClients: "客户端总数",
+    metricRunning: "运行中任务",
+    metricMessages: "缓存消息",
+    clients: "客户端",
+    refresh: "刷新",
+    all: "全部",
+    online: "在线",
+    offline: "离线",
+    sendMessage: "发送消息",
+    client: "客户端",
+    phone: "手机号",
+    message: "消息",
+    dispatchTask: "派发任务",
+    taskTimeline: "任务时间线",
+    messageStream: "消息流",
+    apiRequests: "API 请求记录",
+    randomClient: "随机在线客户端",
+    noClientSelected: "未选择客户端",
+    noClients: "没有符合筛选条件的客户端。",
+    noTasks: "暂无任务。",
+    noMessages: "暂无消息。",
+    noRequests: "暂无 API 请求记录。",
+    noPhone: "无手机号",
+    latestTasks: "最近 50 条任务",
+    latestMessages: "最近 50 条消息",
+    latestRequests: "最近 50 条 API 调用",
+    recentApiCalls: "最近 {count} 条 API 调用",
+    onlineSummary: "{online} 在线 / 共 {total}",
+    filteredBy: "按 {id} 筛选",
+    dispatchingWith: "将使用 {name} 派发",
+    hubRefreshed: "Hub 状态已刷新",
+    taskDispatched: "任务已派发",
+    taskLabel: "任务 {id}",
+    clientLabel: "客户端：{value}",
+    toLabel: "发送至：{value}",
+    chatLabel: "会话：{value}",
+    tokenPlaceholder: "Hub API Token",
+    messagePlaceholder: "输入消息内容"
+  }
+};
+
+function t(key, values = {}) {
+  const template = i18n[state.language]?.[key] || i18n.en[key] || key;
+  return template.replace(/\{(\w+)\}/g, (_, name) => values[name] ?? "");
+}
 
 function api(path, options = {}) {
   return fetch(path, {
@@ -94,12 +199,13 @@ function render() {
   $("stat-clients").textContent = state.clients.length;
   $("stat-running").textContent = runningCount;
   $("stat-messages").textContent = state.messages.length;
-  $("client-summary").textContent = `${onlineCount} online / ${state.clients.length} total`;
-  $("task-summary").textContent = state.selectedClientId ? `Filtered by ${state.selectedClientId}` : "Latest 50 tasks";
-  $("message-summary").textContent = state.selectedClientId ? `Filtered by ${state.selectedClientId}` : "Latest 50 messages";
-  $("request-summary").textContent = `${state.apiRequests.length} recent API calls`;
-  $("dispatch-hint").textContent = activeClient ? `Dispatching with ${activeClient.name || activeClient.id}` : "Random online client";
-  $("selected-client-pill").textContent = activeClient ? activeClient.id : "No client selected";
+  applyLanguage();
+  $("client-summary").textContent = t("onlineSummary", { online: onlineCount, total: state.clients.length });
+  $("task-summary").textContent = state.selectedClientId ? t("filteredBy", { id: state.selectedClientId }) : t("latestTasks");
+  $("message-summary").textContent = state.selectedClientId ? t("filteredBy", { id: state.selectedClientId }) : t("latestMessages");
+  $("request-summary").textContent = t("recentApiCalls", { count: state.apiRequests.length });
+  $("dispatch-hint").textContent = activeClient ? t("dispatchingWith", { name: activeClient.name || activeClient.id }) : t("randomClient");
+  $("selected-client-pill").textContent = activeClient ? activeClient.id : t("noClientSelected");
 
   $("clients").innerHTML = visibleClients.length ? visibleClients.map((client) => `
     <article class="client-card ${client.id === state.selectedClientId ? "selected" : ""}" data-client-id="${escapeHtml(client.id)}">
@@ -111,14 +217,14 @@ function render() {
         </div>
       </div>
       <div class="client-meta">
-        <span>${escapeHtml(client.phone || "No phone")}</span>
+        <span>${escapeHtml(client.phone || t("noPhone"))}</span>
         <span title="${escapeHtml(fmt(client.last_seen_at))}">${relativeTime(client.last_seen_at)}</span>
       </div>
       <div>${badge(client.status)}</div>
     </article>
-  `).join("") : `<div class="empty-state">No clients match this filter.</div>`;
+  `).join("") : `<div class="empty-state">${escapeHtml(t("noClients"))}</div>`;
 
-  $("send-client").innerHTML = `<option value="">Random online client</option>` + state.clients
+  $("send-client").innerHTML = `<option value="">${escapeHtml(t("randomClient"))}</option>` + state.clients
     .filter((client) => client.status === "online")
     .map((client) => `<option value="${escapeHtml(client.id)}">${escapeHtml(client.name || client.id)}</option>`)
     .join("");
@@ -127,17 +233,17 @@ function render() {
   $("tasks").innerHTML = tasks.length ? tasks.map((task) => `
     <article class="task-item">
       <div class="task-top">
-        <span class="task-id" title="${escapeHtml(task.id)}">Task ${escapeHtml(shortId(task.id))}</span>
+        <span class="task-id" title="${escapeHtml(task.id)}">${escapeHtml(t("taskLabel", { id: shortId(task.id) }))}</span>
         ${badge(task.status)}
       </div>
       <div class="task-body">${escapeHtml(task.payload?.body || task.type || "Task")}</div>
       <div class="task-meta">
-        <span>Client: ${escapeHtml(task.client_id || "-")}</span>
-        <span>To: ${escapeHtml(task.target_phone || "-")}</span>
+        <span>${escapeHtml(t("clientLabel", { value: task.client_id || "-" }))}</span>
+        <span>${escapeHtml(t("toLabel", { value: task.target_phone || "-" }))}</span>
         <span title="${escapeHtml(fmt(task.updated_at))}">${relativeTime(task.updated_at)}</span>
       </div>
     </article>
-  `).join("") : `<div class="empty-state">No tasks to show.</div>`;
+  `).join("") : `<div class="empty-state">${escapeHtml(t("noTasks"))}</div>`;
 
   $("messages").innerHTML = messages.length ? messages.map((message) => `
     <article class="message">
@@ -147,12 +253,12 @@ function render() {
       </header>
       <p>${escapeHtml(message.body || "")}</p>
       <div class="message-meta">
-        <span>Client: ${escapeHtml(message.client_id)}</span>
-        <span>Chat: ${escapeHtml(message.chat_id || "-")}</span>
+        <span>${escapeHtml(t("clientLabel", { value: message.client_id }))}</span>
+        <span>${escapeHtml(t("chatLabel", { value: message.chat_id || "-" }))}</span>
         <span title="${escapeHtml(fmt(message.created_at))}">${relativeTime(message.created_at)}</span>
       </div>
     </article>
-  `).join("") : `<div class="empty-state">No messages to show.</div>`;
+  `).join("") : `<div class="empty-state">${escapeHtml(t("noMessages"))}</div>`;
 
   $("requests").innerHTML = state.apiRequests.length ? state.apiRequests.map((request) => `
     <article class="request-item">
@@ -167,11 +273,22 @@ function render() {
         <span title="${escapeHtml(fmt(request.created_at))}">${relativeTime(request.created_at)}</span>
       </div>
     </article>
-  `).join("") : `<div class="empty-state">No API requests recorded yet.</div>`;
+  `).join("") : `<div class="empty-state">${escapeHtml(t("noRequests"))}</div>`;
 
   document.querySelectorAll(".filter-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.filter === state.clientFilter);
   });
+}
+
+function applyLanguage() {
+  document.documentElement.lang = state.language === "zh" ? "zh-CN" : "en";
+  document.querySelectorAll("[data-i18n]").forEach((node) => {
+    node.textContent = t(node.dataset.i18n);
+  });
+  $("token-input").placeholder = t("tokenPlaceholder");
+  $("send-body").placeholder = t("messagePlaceholder");
+  $("lang-en").classList.toggle("active", state.language === "en");
+  $("lang-zh").classList.toggle("active", state.language === "zh");
 }
 
 function statusClass(statusCode) {
@@ -194,11 +311,11 @@ function showToast(message) {
 
 async function load() {
   if (!state.token) {
-    setConnectionLabel("Enter API token to connect");
+    setConnectionLabel(t("enterToken"));
     render();
     return;
   }
-  setConnectionLabel("Loading hub state");
+  setConnectionLabel(t("loading"));
   const [clients, tasks, messages, requests] = await Promise.all([
     api("/api/clients"),
     api("/api/tasks?limit=50"),
@@ -209,7 +326,7 @@ async function load() {
   state.tasks = tasks.tasks;
   state.messages = messages.messages;
   state.apiRequests = requests.requests;
-  setConnectionLabel("Connected");
+  setConnectionLabel(t("connected"));
   render();
   connectSocket();
 }
@@ -218,8 +335,8 @@ function connectSocket() {
   if (state.socket?.connected) return;
   state.socket?.disconnect();
   state.socket = io({ auth: { token: state.token } });
-  state.socket.on("connect", () => setConnectionLabel("Realtime connected"));
-  state.socket.on("disconnect", () => setConnectionLabel("Realtime disconnected"));
+  state.socket.on("connect", () => setConnectionLabel(t("realtimeConnected")));
+  state.socket.on("disconnect", () => setConnectionLabel(t("realtimeDisconnected")));
   state.socket.on("client:updated", (client) => {
     state.clients = [client, ...state.clients.filter((item) => item.id !== client.id)];
     render();
@@ -242,16 +359,19 @@ function bindEvents() {
     state.token = $("token-input").value.trim();
     localStorage.setItem("hubToken", state.token);
     await load().catch((error) => {
-      setConnectionLabel("Connection failed");
+      setConnectionLabel(t("connectionFailed"));
       showToast(error.message);
     });
   });
 
   $("refresh").addEventListener("click", () => {
     load()
-      .then(() => showToast("Hub state refreshed"))
+      .then(() => showToast(t("hubRefreshed")))
       .catch((error) => showToast(error.message));
   });
+
+  $("lang-en").addEventListener("click", () => setLanguage("en"));
+  $("lang-zh").addEventListener("click", () => setLanguage("zh"));
 
   document.querySelectorAll(".filter-button").forEach((button) => {
     button.dataset.filter = button.id.replace("filter-", "");
@@ -287,7 +407,7 @@ function bindEvents() {
       .then(({ task }) => {
         state.tasks = [task, ...state.tasks.filter((item) => item.id !== task.id)];
         $("send-body").value = "";
-        showToast("Task dispatched");
+        showToast(t("taskDispatched"));
         render();
       })
       .catch((error) => showToast(error.message))
@@ -297,6 +417,13 @@ function bindEvents() {
   });
 }
 
+function setLanguage(language) {
+  state.language = language;
+  localStorage.setItem("hubLanguage", language);
+  render();
+}
+
 bindEvents();
+applyLanguage();
 render();
-load().catch(() => setConnectionLabel("Connection failed"));
+load().catch(() => setConnectionLabel(t("connectionFailed")));

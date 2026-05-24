@@ -127,6 +127,31 @@ p {
   grid-template-columns: minmax(220px, 360px) auto;
 }
 
+.language-switch {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(2, 1fr);
+  padding: 4px;
+}
+
+.language-button {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  min-height: 32px;
+  min-width: 54px;
+  padding: 0 10px;
+}
+
+.language-button.active {
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(23, 32, 42, 0.08);
+  color: var(--ink);
+}
+
 .dashboard {
   display: grid;
   gap: 16px;

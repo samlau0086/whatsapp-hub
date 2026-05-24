@@ -16,6 +16,11 @@
         </div>
       </div>
 
+      <div class="language-switch" role="group" aria-label="Language">
+        <button id="lang-en" type="button" class="language-button active">EN</button>
+        <button id="lang-zh" type="button" class="language-button">中文</button>
+      </div>
+
       <form id="token-form" class="token-form">
         <input id="token-input" type="password" placeholder="Hub API token" autocomplete="current-password" />
         <button type="submit">Connect</button>
@@ -25,19 +30,19 @@
     <main class="dashboard">
       <section class="metric-strip" aria-label="Overview">
         <article class="metric-card">
-          <span>Online clients</span>
+          <span data-i18n="metricOnline">Online clients</span>
           <strong id="stat-online">0</strong>
         </article>
         <article class="metric-card">
-          <span>Total clients</span>
+          <span data-i18n="metricClients">Total clients</span>
           <strong id="stat-clients">0</strong>
         </article>
         <article class="metric-card">
-          <span>Running tasks</span>
+          <span data-i18n="metricRunning">Running tasks</span>
           <strong id="stat-running">0</strong>
         </article>
         <article class="metric-card">
-          <span>Messages cached</span>
+          <span data-i18n="metricMessages">Messages cached</span>
           <strong id="stat-messages">0</strong>
         </article>
       </section>
@@ -46,16 +51,16 @@
         <aside class="side-panel">
           <div class="section-head">
             <div>
-              <h2>Clients</h2>
+              <h2 data-i18n="clients">Clients</h2>
               <p id="client-summary">0 online</p>
             </div>
-            <button id="refresh" class="ghost-button" type="button">Refresh</button>
+            <button id="refresh" class="ghost-button" type="button" data-i18n="refresh">Refresh</button>
           </div>
 
           <div class="filter-row">
-            <button id="filter-all" class="filter-button active" type="button">All</button>
-            <button id="filter-online" class="filter-button" type="button">Online</button>
-            <button id="filter-offline" class="filter-button" type="button">Offline</button>
+            <button id="filter-all" class="filter-button active" type="button" data-i18n="all">All</button>
+            <button id="filter-online" class="filter-button" type="button" data-i18n="online">Online</button>
+            <button id="filter-offline" class="filter-button" type="button" data-i18n="offline">Offline</button>
           </div>
 
           <div id="clients" class="client-list"></div>
@@ -65,7 +70,7 @@
           <div class="compose-panel">
             <div class="section-head">
               <div>
-                <h2>Send Message</h2>
+                <h2 data-i18n="sendMessage">Send Message</h2>
                 <p id="dispatch-hint">Random online client</p>
               </div>
               <span id="selected-client-pill" class="soft-pill">No client selected</span>
@@ -73,20 +78,20 @@
 
             <form id="send-form" class="send-form">
               <label>
-                <span>Client</span>
+                <span data-i18n="client">Client</span>
                 <select id="send-client">
                   <option value="">Random online client</option>
                 </select>
               </label>
               <label>
-                <span>Phone</span>
+                <span data-i18n="phone">Phone</span>
                 <input id="send-to" placeholder="15551234567" />
               </label>
               <label class="message-input">
-                <span>Message</span>
+                <span data-i18n="message">Message</span>
                 <textarea id="send-body" placeholder="Type message body"></textarea>
               </label>
-              <button type="submit">Dispatch task</button>
+              <button type="submit" data-i18n="dispatchTask">Dispatch task</button>
             </form>
           </div>
 
@@ -94,7 +99,7 @@
             <section class="panel-card">
               <div class="section-head">
                 <div>
-                  <h2>Task Timeline</h2>
+                  <h2 data-i18n="taskTimeline">Task Timeline</h2>
                   <p id="task-summary">Latest 50 tasks</p>
                 </div>
               </div>
@@ -104,7 +109,7 @@
             <section class="panel-card">
               <div class="section-head">
                 <div>
-                  <h2>Message Stream</h2>
+                  <h2 data-i18n="messageStream">Message Stream</h2>
                   <p id="message-summary">Latest 50 messages</p>
                 </div>
               </div>
@@ -115,7 +120,7 @@
           <section class="panel-card">
             <div class="section-head">
               <div>
-                <h2>API Requests</h2>
+                <h2 data-i18n="apiRequests">API Requests</h2>
                 <p id="request-summary">Latest 50 API calls</p>
               </div>
             </div>
