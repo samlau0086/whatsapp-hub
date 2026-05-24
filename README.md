@@ -56,6 +56,33 @@ TRUST_PROXY=true
 docker compose up -d --build
 ```
 
+## GitHub Actions 自动部署
+
+仓库已包含 `.github/workflows/deploy-vps.yml`。推送到 `main` 或手动运行 workflow 时，GitHub Actions 会打包项目，通过 SSH 上传到 VPS，然后执行 `docker compose up -d --build --remove-orphans`。
+
+在 GitHub 仓库的 `Settings -> Secrets and variables -> Actions -> Repository secrets` 添加：
+
+- `VPS_HOST`: VPS IP 或域名。
+- `VPS_PORT`: SSH 端口，默认可填 `22`。
+- `VPS_USER`: SSH 用户，例如 `root` 或 `deploy`。
+- `VPS_SSH_PRIVATE_KEY`: GitHub Actions 用于登录 VPS 的私钥。
+- `VPS_DEPLOY_PATH`: 部署目录，例如 `/opt/whatsapp-hub`。
+- `VPS_ENV_FILE`: 生产环境 `.env` 的完整内容。
+
+`VPS_ENV_FILE` 示例：
+
+```bash
+PORT=3000
+DATABASE_PATH=./data/hub.sqlite
+HUB_API_TOKEN=replace-with-a-long-random-token
+PUBLIC_BASE_URL=https://hub.example.com
+TRUST_PROXY=true
+```
+
+VPS 需要提前安装 Docker 和 Docker Compose，并允许上述 SSH 用户访问 Docker。首次部署前确认目录存在权限正常，或让 workflow 自动创建 `VPS_DEPLOY_PATH`。
+
+VPS 镜像只安装 Hub 运行所需依赖，不安装 `whatsapp-web.js` 和 Puppeteer。内网电脑运行 agent 时使用普通 `npm install`，会安装这些 optional dependencies。
+
 Nginx 反向代理示例，重点是保留 WebSocket upgrade：
 
 ```nginx

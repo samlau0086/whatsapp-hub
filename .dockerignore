@@ -1,0 +1,9 @@
+.git
+.github
+node_modules
+data
+.env
+.wwebjs_auth
+.wwebjs_cache
+npm-debug.log*
+*.tgz
