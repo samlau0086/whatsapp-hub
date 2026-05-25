@@ -416,6 +416,55 @@ curl -X POST https://hub.example.com/api/tasks/send-message \
 }
 ```
 
+### 上传并发送媒体消息
+
+先上传附件。支持图片、视频和普通文件，单文件默认最大 50 MB：
+
+```bash
+curl -X POST https://hub.example.com/api/uploads \
+  -H "x-hub-token: replace-with-a-long-random-token" \
+  -F "file=@./invoice.pdf"
+```
+
+响应：
+
+```json
+{
+  "file": {
+    "id": "f3a1d28db4d94b6b9e9c0f0b4e5a7d23",
+    "originalName": "invoice.pdf",
+    "mimeType": "application/pdf",
+    "size": 245760,
+    "path": "data/uploads/f3a1d28db4d94b6b9e9c0f0b4e5a7d23",
+    "url": "/uploads/f3a1d28db4d94b6b9e9c0f0b4e5a7d23"
+  }
+}
+```
+
+然后把响应里的 `file` 放进发送任务的 `media` 字段：
+
+```bash
+curl -X POST https://hub.example.com/api/tasks/send-message \
+  -H "content-type: application/json" \
+  -H "x-hub-token: replace-with-a-long-random-token" \
+  -d "{\"to\":\"15551234567\",\"body\":\"please check this file\",\"media\":{\"url\":\"/uploads/f3a1d28db4d94b6b9e9c0f0b4e5a7d23\",\"originalName\":\"invoice.pdf\",\"mimeType\":\"application/pdf\",\"sendAsDocument\":true}}"
+```
+
+图片或视频可以不传 `sendAsDocument`，文件建议传 `true`：
+
+```json
+{
+  "to": "15551234567",
+  "body": "photo caption",
+  "media": {
+    "url": "/uploads/f3a1d28db4d94b6b9e9c0f0b4e5a7d23",
+    "originalName": "photo.jpg",
+    "mimeType": "image/jpeg",
+    "sendAsDocument": false
+  }
+}
+```
+
 ### 查询 clients
 
 请求：

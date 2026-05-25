@@ -290,6 +290,20 @@ app.get("/api/requests", (req, res) => {
   });
 });
 
+app.post("/api/uploads", upload.single("file"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "file is required" });
+  res.status(201).json({
+    file: {
+      id: req.file.filename,
+      originalName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      size: req.file.size,
+      path: req.file.path,
+      url: `/uploads/${req.file.filename}`
+    }
+  });
+});
+
 app.post("/api/tasks/send-message", async (req, res) => {
   const dispatched = await createAndDispatchMessageTask(req, res);
   if (dispatched) res.status(202).json({ task: dispatched });
