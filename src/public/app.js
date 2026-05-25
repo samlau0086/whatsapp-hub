@@ -543,22 +543,33 @@ function bindEvents() {
     event.preventDefault();
     if (!state.selectedClientId || !state.selectedChatId) return;
     const body = $("chat-send-body").value.trim();
-    if (!body) return;
+    const file = $("chat-file").files[0];
+    if (!body && !file) return;
+    const media = file ? await uploadChatFile(file) : null;
     await api("/admin/api/tasks/send-message", {
       method: "POST",
       body: JSON.stringify({
         clientId: state.selectedClientId,
         to: state.selectedChatId,
-        body
+        body,
+        media
       })
     })
       .then(({ task }) => {
         state.tasks = [task, ...state.tasks.filter((item) => item.id !== task.id)].slice(0, 50);
         $("chat-send-body").value = "";
+        $("chat-file").value = "";
         showToast(t("taskDispatched"));
         render();
       })
       .catch((error) => showToast(error.message));
+  });
+
+  document.querySelectorAll("[data-emoji]").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("chat-send-body").value += button.dataset.emoji;
+      $("chat-send-body").focus();
+    });
   });
 
   $("tasks").addEventListener("click", async (event) => {
@@ -610,6 +621,19 @@ function bindEvents() {
         submit.disabled = false;
       });
   });
+}
+
+async function uploadChatFile(file) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch("/admin/api/uploads", {
+    method: "POST",
+    credentials: "same-origin",
+    body: form
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || res.statusText);
+  return body.file;
 }
 
 async function removeClient(clientId) {

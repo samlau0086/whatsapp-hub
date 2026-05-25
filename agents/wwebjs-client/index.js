@@ -1,4 +1,6 @@
 import dotenv from "dotenv";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import qrcode from "qrcode-terminal";
 import { io } from "socket.io-client";
@@ -6,7 +8,7 @@ import pkg from "whatsapp-web.js";
 
 dotenv.config();
 
-const { Client, LocalAuth } = pkg;
+const { Client, LocalAuth, MessageMedia } = pkg;
 
 const config = {
   hubUrl: process.env.HUB_URL || "http://localhost:3000",
@@ -81,7 +83,14 @@ socket.on("task:send-message", async (task, ack) => {
   try {
     const { to, body } = task.payload;
     const chatId = to.includes("@c.us") ? to : `${to.replace(/\D/g, "")}@c.us`;
-    const result = await whatsapp.sendMessage(chatId, body);
+    const mediaPayload = task.payload.media;
+    const localMediaPath = mediaPayload?.url ? await downloadMedia(mediaPayload) : null;
+    const result = localMediaPath
+      ? await whatsapp.sendMessage(chatId, MessageMedia.fromFilePath(localMediaPath), {
+          caption: body || "",
+          sendMediaAsDocument: mediaPayload.sendAsDocument === true
+        })
+      : await whatsapp.sendMessage(chatId, body);
     socket.emit("task:result", {
       taskId: task.id,
       ok: true,
@@ -98,6 +107,19 @@ socket.on("task:send-message", async (task, ack) => {
     });
   }
 });
+
+async function downloadMedia(mediaPayload) {
+  const url = new URL(mediaPayload.url, config.hubUrl).toString();
+  const response = await fetch(url, {
+    headers: { "x-hub-token": config.token }
+  });
+  if (!response.ok) throw new Error(`failed to download media: ${response.status}`);
+  const extension = path.extname(mediaPayload.originalName || "") || "";
+  const filePath = path.join(os.tmpdir(), `wah-${Date.now()}-${Math.random().toString(16).slice(2)}${extension}`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  await fs.writeFile(filePath, bytes);
+  return filePath;
+}
 
 setInterval(() => {
   if (socket.connected) {

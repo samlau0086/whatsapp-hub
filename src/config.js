@@ -5,6 +5,7 @@ dotenv.config();
 export const config = {
   port: Number(process.env.PORT || 3000),
   databasePath: process.env.DATABASE_PATH || "./data/hub.sqlite",
+  uploadDir: process.env.UPLOAD_DIR || "./data/uploads",
   apiToken: process.env.HUB_API_TOKEN || "dev-token",
   webAdminUsername: process.env.WEB_ADMIN_USERNAME || "",
   webAdminPassword: process.env.WEB_ADMIN_PASSWORD || "",

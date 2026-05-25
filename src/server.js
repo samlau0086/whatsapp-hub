@@ -1,6 +1,8 @@
 import cors from "cors";
 import express from "express";
 import http from "node:http";
+import fs from "node:fs";
+import multer from "multer";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -44,6 +46,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const server = http.createServer(app);
 const hub = createHub(server);
+fs.mkdirSync(config.uploadDir, { recursive: true });
+const upload = multer({ dest: config.uploadDir, limits: { fileSize: 50 * 1024 * 1024 } });
 
 if (config.trustProxy) {
   app.set("trust proxy", 1);
@@ -52,6 +56,11 @@ if (config.trustProxy) {
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public"), { index: false }));
+app.use("/uploads", (req, res, next) => {
+  const token = req.header("x-hub-token") || req.query.token;
+  if (token === config.apiToken || req.header("cookie")) return next();
+  return res.status(401).send("unauthorized");
+}, express.static(path.resolve(config.uploadDir)));
 
 app.get("/", requireWebSession, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
@@ -132,6 +141,20 @@ app.patch("/admin/api/tasks/:id/assign", requireWebSession, requirePermission("t
 app.post("/admin/api/tasks/send-message", requireWebSession, requirePermission("tasks:send"), async (req, res) => {
   const dispatched = await createAndDispatchMessageTask(req, res);
   if (dispatched) res.status(202).json({ task: dispatched });
+});
+
+app.post("/admin/api/uploads", requireWebSession, requirePermission("tasks:send"), upload.single("file"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "file is required" });
+  res.status(201).json({
+    file: {
+      id: req.file.filename,
+      originalName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      size: req.file.size,
+      path: req.file.path,
+      url: `/uploads/${req.file.filename}`
+    }
+  });
 });
 
 app.get("/admin/api/requests", requireWebSession, requirePermission("requests:read"), (req, res) => {
@@ -323,9 +346,9 @@ function sanitizeRequestBody(body) {
 }
 
 async function createAndDispatchMessageTask(req, res) {
-  const { clientId, to, body, metadata } = req.body || {};
-  if (!to || !body) {
-    res.status(400).json({ error: "to and body are required" });
+  const { clientId, to, body, metadata, media } = req.body || {};
+  if (!to || (!body && !media)) {
+    res.status(400).json({ error: "to and body or media are required" });
     return null;
   }
 
@@ -343,7 +366,8 @@ async function createAndDispatchMessageTask(req, res) {
     targetPhone: to,
     payload: {
       to,
-      body,
+      body: body || "",
+      media: media || null,
       metadata: metadata || {},
       routing: {
         reason: stickyClientId ? "sticky-target-client" : (clientId ? "requested-client" : "random-online-client"),

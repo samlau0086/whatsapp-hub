@@ -27,6 +27,7 @@ flowchart LR
 - Webhook 推送 `message.created` 和 `task.updated`。
 - Web 中控实时查看 clients、tasks、messages、API requests，并手动发起发送任务。
 - Web 中控使用登录页和 session cookie，支持多用户、角色和权限管理。
+- 集中聊天界面支持文本、emoji、图片、视频和文件发送。
 
 ## 本地开发
 
@@ -47,6 +48,7 @@ VPS 上的 `.env` 示例：
 ```bash
 PORT=3000
 DATABASE_PATH=./data/hub.sqlite
+UPLOAD_DIR=./data/uploads
 HUB_API_TOKEN=replace-with-a-long-random-token
 WEB_ADMIN_USERNAME=admin
 WEB_ADMIN_PASSWORD=replace-with-a-long-random-admin-password
@@ -80,6 +82,7 @@ docker compose up -d --build
 ```bash
 PORT=3000
 DATABASE_PATH=./data/hub.sqlite
+UPLOAD_DIR=./data/uploads
 HUB_API_TOKEN=replace-with-a-long-random-token
 WEB_ADMIN_USERNAME=admin
 WEB_ADMIN_PASSWORD=replace-with-a-long-random-admin-password
@@ -735,6 +738,7 @@ Hub:
 - `HOST_BIND_ADDRESS`: VPS 绑定地址。使用 Nginx 反代时建议 `127.0.0.1`。
 - `HOST_PORT`: VPS 绑定端口。如果 `3000` 已被占用，可以改成 `3001`，并让 Nginx 反代到对应端口。
 - `DATABASE_PATH`: SQLite 文件位置，默认 `./data/hub.sqlite`。
+- `UPLOAD_DIR`: Web 后台上传附件保存目录，默认 `./data/uploads`。
 - `HUB_API_TOKEN`: API 和 Socket.IO 认证 token。
 - `WEB_ADMIN_USERNAME`: 首次初始化 Web 管理员用户名。
 - `WEB_ADMIN_PASSWORD`: 首次初始化 Web 管理员密码。

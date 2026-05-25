@@ -372,6 +372,24 @@ p {
   padding: 12px;
 }
 
+.emoji-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  grid-column: 1 / -1;
+}
+
+.emoji-row button {
+  background: var(--control-bg);
+  color: var(--control-text);
+  min-height: 32px;
+  padding: 0 8px;
+}
+
+#chat-file {
+  grid-column: 1 / -1;
+}
+
 .chat-send-form textarea {
   min-height: 48px;
 }
