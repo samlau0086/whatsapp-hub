@@ -170,6 +170,16 @@ export function removeClient(id) {
   return transaction(id);
 }
 
+export function purgeClientData(id) {
+  const transaction = db.transaction((clientId) => {
+    const messages = db.prepare("DELETE FROM messages WHERE client_id = ?").run(clientId).changes;
+    const tasks = db.prepare("DELETE FROM tasks WHERE client_id = ?").run(clientId).changes;
+    const clients = db.prepare("DELETE FROM clients WHERE id = ?").run(clientId).changes;
+    return { clients, tasks, messages };
+  });
+  return transaction(id);
+}
+
 export function getClient(id) {
   return mapClient(db.prepare("SELECT * FROM clients WHERE id = ?").get(id));
 }

@@ -44,6 +44,12 @@ export function createHub(httpServer) {
     socket.on("client:hello", (payload = {}, ack) => {
       if (socket.data.kind !== "agent") return ack?.({ ok: false, error: "forbidden" });
       const id = payload.id || socket.id;
+      const previousSocketId = socketsByClient.get(id);
+      const previousSocket = previousSocketId && io.sockets.sockets.get(previousSocketId);
+      if (previousSocket && previousSocket.id !== socket.id) {
+        previousSocket.data.clientId = null;
+        previousSocket.disconnect(true);
+      }
       socket.data.clientId = id;
       socketsByClient.set(id, socket.id);
       const client = upsertClient({
@@ -166,6 +172,16 @@ export function createHub(httpServer) {
       }
     }
   };
+}
+
+export function forgetClientSocket(clientId) {
+  const socketId = socketsByClient.get(clientId);
+  const socket = socketId && activeIo?.sockets.sockets.get(socketId);
+  if (socket) {
+    socket.data.clientId = null;
+    socket.disconnect(true);
+  }
+  socketsByClient.delete(clientId);
 }
 
 export async function dispatchQueuedTasksForClient(clientId) {

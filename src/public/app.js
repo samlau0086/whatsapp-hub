@@ -532,7 +532,7 @@ function bindEvents() {
 }
 
 async function removeClient(clientId) {
-  await api(`/admin/api/clients/${clientId}`, { method: "DELETE" })
+  await api(`/admin/api/clients/${clientId}/data`, { method: "DELETE" })
     .then(() => {
       state.clients = state.clients.filter((client) => client.id !== clientId);
       state.tasks = state.tasks.filter((task) => task.client_id !== clientId);

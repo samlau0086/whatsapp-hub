@@ -32,11 +32,12 @@ import {
   listTasks,
   listUsers,
   listWebhooks,
+  purgeClientData,
   removeClient,
   setClientStatus,
   updateUser
 } from "./db.js";
-import { chooseClient, createHub, reconcileClientPresence } from "./hub.js";
+import { chooseClient, createHub, forgetClientSocket, reconcileClientPresence } from "./hub.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -82,9 +83,15 @@ app.get("/admin/api/clients", requireWebSession, requirePermission("clients:read
 });
 
 app.delete("/admin/api/clients/:id", requireWebSession, requirePermission("clients:delete"), (req, res) => {
+  forgetClientSocket(req.params.id);
   setClientStatus(req.params.id, "offline");
   const deleted = removeClient(req.params.id);
   res.json({ ok: deleted });
+});
+
+app.delete("/admin/api/clients/:id/data", requireWebSession, requirePermission("clients:delete"), (req, res) => {
+  forgetClientSocket(req.params.id);
+  res.json({ ok: true, deleted: purgeClientData(req.params.id) });
 });
 
 app.get("/admin/api/messages", requireWebSession, requirePermission("messages:read"), (req, res) => {
@@ -214,9 +221,15 @@ app.get("/api/clients/:id", (req, res) => {
 });
 
 app.delete("/api/clients/:id", (req, res) => {
+  forgetClientSocket(req.params.id);
   setClientStatus(req.params.id, "offline");
   const deleted = removeClient(req.params.id);
   res.json({ ok: deleted });
+});
+
+app.delete("/api/clients/:id/data", (req, res) => {
+  forgetClientSocket(req.params.id);
+  res.json({ ok: true, deleted: purgeClientData(req.params.id) });
 });
 
 app.get("/api/clients/:id/messages", (req, res) => {
