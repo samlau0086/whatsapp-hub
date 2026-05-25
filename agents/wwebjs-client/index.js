@@ -15,8 +15,16 @@ const config = {
   clientName: process.env.CLIENT_NAME || "Main WhatsApp Client",
   authDataPath: path.resolve(process.env.WWEBJS_AUTH_DATA_PATH || ".wwebjs_auth"),
   cachePath: path.resolve(process.env.WWEBJS_CACHE_PATH || ".wwebjs_cache"),
+  proxyUrl: process.env.CLIENT_PROXY_URL || "",
+  proxyUsername: process.env.CLIENT_PROXY_USERNAME || "",
+  proxyPassword: process.env.CLIENT_PROXY_PASSWORD || "",
   headless: process.env.PUPPETEER_HEADLESS !== "false"
 };
+
+const puppeteerArgs = ["--no-sandbox", "--disable-setuid-sandbox"];
+if (config.proxyUrl) {
+  puppeteerArgs.push(`--proxy-server=${config.proxyUrl}`);
+}
 
 const socket = io(config.hubUrl, {
   auth: { token: config.token },
@@ -29,9 +37,17 @@ const whatsapp = new Client({
     clientId: config.clientId,
     dataPath: config.authDataPath
   }),
+  ...(config.proxyUsername || config.proxyPassword
+    ? {
+        proxyAuthentication: {
+          username: config.proxyUsername,
+          password: config.proxyPassword
+        }
+      }
+    : {}),
   puppeteer: {
     headless: config.headless,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
+    args: puppeteerArgs
   },
   webVersionCache: {
     type: "local",
@@ -41,6 +57,7 @@ const whatsapp = new Client({
 
 console.log(`auth data path: ${config.authDataPath}`);
 console.log(`web cache path: ${config.cachePath}`);
+console.log(`proxy: ${config.proxyUrl || "disabled"}`);
 
 function emitHello(status = "online") {
   socket.emit("client:hello", {

@@ -173,6 +173,9 @@ CLIENT_NAME=Office PC 01
 CLIENT_TOKEN=replace-with-the-same-value-as-HUB_API_TOKEN
 WWEBJS_AUTH_DATA_PATH=./.wwebjs_auth
 WWEBJS_CACHE_PATH=./.wwebjs_cache
+CLIENT_PROXY_URL=
+CLIENT_PROXY_USERNAME=
+CLIENT_PROXY_PASSWORD=
 PUPPETEER_HEADLESS=false
 ```
 
@@ -184,6 +187,9 @@ PUPPETEER_HEADLESS=false
 - `CLIENT_TOKEN`: 必须等于 VPS Hub 的 `HUB_API_TOKEN`。
 - `WWEBJS_AUTH_DATA_PATH`: WhatsApp Web 登录态保存目录。必须持久化，不能每次启动换目录或删除。
 - `WWEBJS_CACHE_PATH`: WhatsApp Web 版本缓存目录。
+- `CLIENT_PROXY_URL`: 当前 client 使用的代理，例如 `http://127.0.0.1:7890`、`socks5://127.0.0.1:1080`。
+- `CLIENT_PROXY_USERNAME`: 代理用户名，没有认证可留空。
+- `CLIENT_PROXY_PASSWORD`: 代理密码，没有认证可留空。
 - `PUPPETEER_HEADLESS`: 首次调试建议 `false`，稳定后可改为 `true`。
 
 启动 agent：
@@ -213,6 +219,52 @@ WWEBJS_CACHE_PATH=C:/whatsapp-hub-data/cache
 ```
 
 不要把这些目录放进临时目录，也不要在更新代码时删除它们。每台内网电脑可以有自己的保存目录；同一台电脑上多个 client 也必须使用不同的 `CLIENT_ID`。
+
+### 同一设备运行多个 clients
+
+同一台设备可以运行多个 agent，但每个 agent 必须使用独立配置：
+
+- 不同的 `CLIENT_ID`
+- 不同的 `CLIENT_NAME`
+- 不同的 `WWEBJS_AUTH_DATA_PATH`
+- 不同的 `WWEBJS_CACHE_PATH`
+- 如需隔离网络出口，配置不同的 `CLIENT_PROXY_URL`
+
+示例一：
+
+```bash
+HUB_URL=https://ws.geekmt.com
+CLIENT_ID=office-pc-01
+CLIENT_NAME=Office PC 01
+CLIENT_TOKEN=replace-with-the-same-value-as-HUB_API_TOKEN
+WWEBJS_AUTH_DATA_PATH=C:/whatsapp-hub-data/office-pc-01/auth
+WWEBJS_CACHE_PATH=C:/whatsapp-hub-data/office-pc-01/cache
+CLIENT_PROXY_URL=socks5://127.0.0.1:1081
+PUPPETEER_HEADLESS=false
+```
+
+示例二：
+
+```bash
+HUB_URL=https://ws.geekmt.com
+CLIENT_ID=office-pc-02
+CLIENT_NAME=Office PC 02
+CLIENT_TOKEN=replace-with-the-same-value-as-HUB_API_TOKEN
+WWEBJS_AUTH_DATA_PATH=C:/whatsapp-hub-data/office-pc-02/auth
+WWEBJS_CACHE_PATH=C:/whatsapp-hub-data/office-pc-02/cache
+CLIENT_PROXY_URL=http://127.0.0.1:7890
+PUPPETEER_HEADLESS=false
+```
+
+如果代理需要账号密码：
+
+```bash
+CLIENT_PROXY_URL=http://proxy.example.com:8080
+CLIENT_PROXY_USERNAME=my-user
+CLIENT_PROXY_PASSWORD=my-password
+```
+
+代理由 Chromium/Puppeteer 使用，用于 WhatsApp Web 页面访问；Hub 的 Socket.IO 连接仍按系统网络直接连接 VPS。
 
 ### Windows 持续运行
 
@@ -698,6 +750,9 @@ Agent:
 - `CLIENT_TOKEN`: 连接 hub 的 token，应与 `HUB_API_TOKEN` 一致。
 - `WWEBJS_AUTH_DATA_PATH`: WhatsApp Web 登录态保存目录。
 - `WWEBJS_CACHE_PATH`: WhatsApp Web 缓存目录。
+- `CLIENT_PROXY_URL`: WhatsApp Web 访问代理。
+- `CLIENT_PROXY_USERNAME`: 代理用户名。
+- `CLIENT_PROXY_PASSWORD`: 代理密码。
 - `PUPPETEER_HEADLESS`: 是否无头运行 Chromium。
 
 ## 后续可扩展点
