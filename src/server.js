@@ -28,6 +28,7 @@ import {
   findLastOutboundClientForTarget,
   listApiRequests,
   listClients,
+  listChats,
   listMessages,
   listTasks,
   listUsers,
@@ -104,6 +105,10 @@ app.get("/admin/api/messages", requireWebSession, requirePermission("messages:re
       limit: req.query.limit
     })
   });
+});
+
+app.get("/admin/api/chats", requireWebSession, requirePermission("messages:read"), (req, res) => {
+  res.json({ chats: listChats({ clientId: req.query.clientId, limit: req.query.limit }) });
 });
 
 app.get("/admin/api/clients/:id/messages", requireWebSession, requirePermission("messages:read"), (req, res) => {
@@ -246,6 +251,10 @@ app.get("/api/messages", (req, res) => {
       limit: req.query.limit
     })
   });
+});
+
+app.get("/api/chats", (req, res) => {
+  res.json({ chats: listChats({ clientId: req.query.clientId, limit: req.query.limit }) });
 });
 
 app.get("/api/requests", (req, res) => {

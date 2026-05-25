@@ -75,6 +75,31 @@
         </aside>
 
         <section class="main-panel">
+          <section class="chat-panel">
+            <div class="chat-sidebar">
+              <div class="section-head">
+                <div>
+                  <h2 data-i18n="centralChat">Central Chat</h2>
+                  <p id="chat-summary">Select a client</p>
+                </div>
+              </div>
+              <div id="chat-list" class="chat-list"></div>
+            </div>
+            <div class="chat-main">
+              <div class="chat-header">
+                <div>
+                  <h2 id="active-chat-title">No chat selected</h2>
+                  <p id="active-chat-subtitle">Choose a client and chat</p>
+                </div>
+              </div>
+              <div id="chat-messages" class="chat-messages"></div>
+              <form id="chat-send-form" class="chat-send-form">
+                <textarea id="chat-send-body" placeholder="Type message"></textarea>
+                <button type="submit" data-i18n="send">Send</button>
+              </form>
+            </div>
+          </section>
+
           <div class="compose-panel">
             <div class="section-head">
               <div>

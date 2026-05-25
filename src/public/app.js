@@ -6,11 +6,13 @@ const state = {
   clients: [],
   tasks: [],
   messages: [],
+  chats: [],
   apiRequests: [],
   users: [],
   socket: null,
   clientFilter: "all",
-  selectedClientId: ""
+  selectedClientId: "",
+  selectedChatId: ""
 };
 
 const $ = (id) => document.getElementById(id);
@@ -38,6 +40,12 @@ const i18n = {
     taskTimeline: "Task Timeline",
     messageStream: "Message Stream",
     apiRequests: "API Requests",
+    centralChat: "Central Chat",
+    send: "Send",
+    selectClient: "Select a client",
+    selectChat: "Choose a client and chat",
+    noChats: "No chats for this client.",
+    noChatSelected: "No chat selected",
     logout: "Logout",
     userManagement: "User Management",
     rolesAccess: "Roles and access control",
@@ -92,6 +100,12 @@ const i18n = {
     taskTimeline: "任务时间线",
     messageStream: "消息流",
     apiRequests: "API 请求记录",
+    centralChat: "集中聊天",
+    send: "发送",
+    selectClient: "选择客户端",
+    selectChat: "请选择客户端和会话",
+    noChats: "此客户端暂无会话。",
+    noChatSelected: "未选择会话",
     logout: "退出",
     userManagement: "用户管理",
     rolesAccess: "角色和访问控制",
@@ -207,6 +221,9 @@ function render() {
   const visibleClients = filteredClients();
   const tasks = scopedTasks();
   const messages = scopedMessages();
+  const activeChatMessages = state.selectedChatId
+    ? state.messages.filter((message) => message.client_id === state.selectedClientId && message.chat_id === state.selectedChatId)
+    : [];
 
   applyLanguage();
   $("current-user").textContent = state.user?.display_name || state.user?.username || "-";
@@ -221,6 +238,9 @@ function render() {
   $("request-summary").textContent = t("recentApiCalls", { count: state.apiRequests.length });
   $("dispatch-hint").textContent = activeClient ? t("dispatchingWith", { name: activeClient.name || activeClient.id }) : t("randomClient");
   $("selected-client-pill").textContent = activeClient ? activeClient.id : t("noClientSelected");
+  $("chat-summary").textContent = activeClient ? activeClient.id : t("selectClient");
+  $("active-chat-title").textContent = state.selectedChatId || t("noChatSelected");
+  $("active-chat-subtitle").textContent = activeClient ? activeClient.name || activeClient.id : t("selectChat");
 
   $("clients").innerHTML = visibleClients.length ? visibleClients.map((client) => `
     <article class="client-card ${client.id === state.selectedClientId ? "selected" : ""}" data-client-id="${escapeHtml(client.id)}">
@@ -247,6 +267,21 @@ function render() {
     .map((client) => `<option value="${escapeHtml(client.id)}">${escapeHtml(client.name || client.id)}</option>`)
     .join("");
   $("send-client").value = activeClient?.status === "online" ? activeClient.id : "";
+
+  $("chat-list").innerHTML = state.chats.length ? state.chats.map((chat) => `
+    <article class="chat-item ${chat.chat_id === state.selectedChatId ? "active" : ""}" data-chat-id="${escapeHtml(chat.chat_id)}">
+      <strong>${escapeHtml(chat.chat_id)}</strong>
+      <span>${escapeHtml(chat.last_body || "")}</span>
+      <span>${escapeHtml(String(chat.message_count))} messages / ${relativeTime(chat.last_message_at)}</span>
+    </article>
+  `).join("") : `<div class="empty-state">${escapeHtml(activeClient ? t("noChats") : t("selectClient"))}</div>`;
+
+  $("chat-messages").innerHTML = activeChatMessages.length ? activeChatMessages.map((message) => `
+    <article class="chat-bubble ${escapeHtml(message.direction || "inbound")}">
+      <p>${escapeHtml(message.body || "")}</p>
+      <span>${escapeHtml(message.sender || "-")} / ${escapeHtml(fmt(message.created_at))}</span>
+    </article>
+  `).join("") : `<div class="empty-state">${escapeHtml(t("selectChat"))}</div>`;
 
   $("tasks").innerHTML = tasks.length ? tasks.map((task) => `
     <article class="task-item">
@@ -367,16 +402,18 @@ async function load() {
   state.user = me.user;
   state.roles = me.roles;
 
-  const [clients, tasks, messages, requests, users] = await Promise.all([
+  const [clients, tasks, messages, chats, requests, users] = await Promise.all([
     can("clients:read") ? api("/admin/api/clients") : Promise.resolve({ clients: [] }),
     can("tasks:read") ? api("/admin/api/tasks?limit=50") : Promise.resolve({ tasks: [] }),
     can("messages:read") ? api("/admin/api/messages?limit=50") : Promise.resolve({ messages: [] }),
+    can("messages:read") && state.selectedClientId ? api(`/admin/api/chats?clientId=${encodeURIComponent(state.selectedClientId)}&limit=100`) : Promise.resolve({ chats: [] }),
     can("requests:read") ? api("/admin/api/requests?limit=50") : Promise.resolve({ requests: [] }),
     can("users:manage") ? api("/admin/api/users") : Promise.resolve({ users: [] })
   ]);
   state.clients = clients.clients;
   state.tasks = tasks.tasks;
   state.messages = messages.messages;
+  state.chats = chats.chats;
   state.apiRequests = requests.requests;
   state.users = users.users;
   setConnectionLabel(t("connected"));
@@ -404,8 +441,17 @@ function connectSocket() {
   state.socket.on("message:created", (message) => {
     if (!can("messages:read")) return;
     state.messages = [message, ...state.messages.filter((item) => item.id !== message.id)].slice(0, 50);
+    if (message.client_id === state.selectedClientId) refreshChats();
     render();
   });
+}
+
+async function refreshChats() {
+  if (!can("messages:read") || !state.selectedClientId) {
+    state.chats = [];
+    return;
+  }
+  state.chats = (await api(`/admin/api/chats?clientId=${encodeURIComponent(state.selectedClientId)}&limit=100`)).chats;
 }
 
 async function logout() {
@@ -477,7 +523,42 @@ function bindEvents() {
     if (!card) return;
     const id = card.dataset.clientId;
     state.selectedClientId = state.selectedClientId === id ? "" : id;
+    state.selectedChatId = "";
+    refreshChats().then(render).catch((error) => showToast(error.message));
+  });
+
+  $("chat-list").addEventListener("click", async (event) => {
+    const item = event.target.closest("[data-chat-id]");
+    if (!item) return;
+    state.selectedChatId = item.dataset.chatId;
+    const messages = await api(`/admin/api/messages?clientId=${encodeURIComponent(state.selectedClientId)}&chatId=${encodeURIComponent(state.selectedChatId)}&limit=100`);
+    state.messages = [
+      ...messages.messages,
+      ...state.messages.filter((message) => message.client_id !== state.selectedClientId || message.chat_id !== state.selectedChatId)
+    ].slice(0, 200);
     render();
+  });
+
+  $("chat-send-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!state.selectedClientId || !state.selectedChatId) return;
+    const body = $("chat-send-body").value.trim();
+    if (!body) return;
+    await api("/admin/api/tasks/send-message", {
+      method: "POST",
+      body: JSON.stringify({
+        clientId: state.selectedClientId,
+        to: state.selectedChatId,
+        body
+      })
+    })
+      .then(({ task }) => {
+        state.tasks = [task, ...state.tasks.filter((item) => item.id !== task.id)].slice(0, 50);
+        $("chat-send-body").value = "";
+        showToast(t("taskDispatched"));
+        render();
+      })
+      .catch((error) => showToast(error.message));
   });
 
   $("tasks").addEventListener("click", async (event) => {

@@ -345,6 +345,41 @@ export function listMessages({ clientId, sender, chatId, targetPhone, limit = 10
   return db.prepare(sql).all(params).map(mapMessage);
 }
 
+export function listChats({ clientId, limit = 100 } = {}) {
+  const params = { limit: Math.min(Number(limit) || 100, 500) };
+  const where = ["chat_id IS NOT NULL", "chat_id != ''"];
+  if (clientId) {
+    where.push("client_id = @clientId");
+    params.clientId = clientId;
+  }
+  return db.prepare(`
+    SELECT
+      chat_id,
+      client_id,
+      MAX(created_at) AS last_message_at,
+      COUNT(*) AS message_count,
+      (
+        SELECT body
+        FROM messages m2
+        WHERE m2.chat_id = messages.chat_id AND m2.client_id = messages.client_id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) AS last_body,
+      (
+        SELECT sender
+        FROM messages m2
+        WHERE m2.chat_id = messages.chat_id AND m2.client_id = messages.client_id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) AS last_sender
+    FROM messages
+    WHERE ${where.join(" AND ")}
+    GROUP BY client_id, chat_id
+    ORDER BY last_message_at DESC
+    LIMIT @limit
+  `).all(params);
+}
+
 export function findLastOutboundClientForTarget(targetPhone) {
   const phone = normalizePhone(targetPhone);
   if (!phone) return null;

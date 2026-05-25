@@ -242,6 +242,7 @@ p {
 
 .side-panel,
 .compose-panel,
+.chat-panel,
 .panel-card {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -264,6 +265,115 @@ p {
 .compose-panel,
 .panel-card {
   padding: 16px;
+}
+
+.chat-panel {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  min-height: 620px;
+  overflow: hidden;
+}
+
+.chat-sidebar {
+  border-right: 1px solid var(--line);
+  padding: 14px;
+}
+
+.chat-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  max-height: 540px;
+  overflow: auto;
+}
+
+.chat-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+}
+
+.chat-item.active {
+  background: color-mix(in srgb, var(--blue-soft) 42%, var(--surface));
+  border-color: #9db9d8;
+}
+
+.chat-item strong,
+.chat-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-item span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chat-main {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+}
+
+.chat-header {
+  border-bottom: 1px solid var(--line);
+  padding: 14px 16px;
+}
+
+.chat-messages {
+  align-content: start;
+  background: var(--surface-soft);
+  display: grid;
+  gap: 10px;
+  overflow: auto;
+  padding: 16px;
+}
+
+.chat-bubble {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  max-width: min(620px, 86%);
+  padding: 10px 12px;
+}
+
+.chat-bubble.inbound {
+  background: var(--surface);
+  justify-self: start;
+}
+
+.chat-bubble.outbound {
+  background: var(--green-soft);
+  justify-self: end;
+}
+
+.chat-bubble p {
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.chat-bubble span {
+  color: var(--muted);
+  display: block;
+  font-size: 11px;
+  margin-top: 6px;
+}
+
+.chat-send-form {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 12px;
+}
+
+.chat-send-form textarea {
+  min-height: 48px;
 }
 
 .section-head {
@@ -660,8 +770,14 @@ p {
 
 @media (max-width: 1180px) {
   .workspace,
-  .content-grid {
+  .content-grid,
+  .chat-panel {
     grid-template-columns: 1fr;
+  }
+
+  .chat-sidebar {
+    border-bottom: 1px solid var(--line);
+    border-right: 0;
   }
 
   .side-panel {
