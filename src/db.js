@@ -162,7 +162,12 @@ export function setClientStatus(id, status) {
 }
 
 export function removeClient(id) {
-  return db.prepare("DELETE FROM clients WHERE id = ?").run(id).changes > 0;
+  const transaction = db.transaction((clientId) => {
+    db.prepare("DELETE FROM messages WHERE client_id = ?").run(clientId);
+    db.prepare("DELETE FROM tasks WHERE client_id = ?").run(clientId);
+    return db.prepare("DELETE FROM clients WHERE id = ?").run(clientId).changes > 0;
+  });
+  return transaction(id);
 }
 
 export function getClient(id) {

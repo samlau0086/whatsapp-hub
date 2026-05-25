@@ -535,6 +535,8 @@ async function removeClient(clientId) {
   await api(`/admin/api/clients/${clientId}`, { method: "DELETE" })
     .then(() => {
       state.clients = state.clients.filter((client) => client.id !== clientId);
+      state.tasks = state.tasks.filter((task) => task.client_id !== clientId);
+      state.messages = state.messages.filter((message) => message.client_id !== clientId);
       if (state.selectedClientId === clientId) state.selectedClientId = "";
       showToast(t("clientRemoved"));
       render();
