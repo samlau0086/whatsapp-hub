@@ -102,6 +102,22 @@ CREATE TABLE IF NOT EXISTS web_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_web_sessions_user ON web_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_web_sessions_expires ON web_sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  permissions TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_used_at TEXT,
+  revoked_at TEXT,
+  FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
 `);
 
 const now = () => new Date().toISOString();
@@ -120,8 +136,14 @@ const mapMessage = (row) => row && ({ ...row, payload: parseJson(row.payload) })
 const mapWebhook = (row) => row && ({ ...row, events: parseJson(row.events, []), enabled: Boolean(row.enabled) });
 const mapApiRequest = (row) => row && ({ ...row, request_body: parseJson(row.request_body, null) });
 const mapUser = (row) => row && ({ ...row, enabled: Boolean(row.enabled) });
+const mapApiToken = (row) => row && ({
+  ...row,
+  enabled: Boolean(row.enabled),
+  permissions: parseJson(row.permissions, [])
+});
 
 seedAdminUser();
+ensureSuperAdminUser();
 
 export function upsertClient({ id, name, phone = null, metadata = {}, status = "online" }) {
   const timestamp = now();
@@ -536,6 +558,69 @@ export function deleteSession(token) {
   return db.prepare("DELETE FROM web_sessions WHERE token = ?").run(token).changes > 0;
 }
 
+export function createApiToken({ name, tokenHash, permissions, createdBy = null, enabled = true }) {
+  const timestamp = now();
+  const row = {
+    id: randomUUID(),
+    name,
+    token_hash: tokenHash,
+    permissions: json(permissions || []),
+    enabled: enabled ? 1 : 0,
+    created_by: createdBy,
+    created_at: timestamp,
+    updated_at: timestamp
+  };
+  db.prepare(`
+    INSERT INTO api_tokens (id, name, token_hash, permissions, enabled, created_by, created_at, updated_at)
+    VALUES (@id, @name, @token_hash, @permissions, @enabled, @created_by, @created_at, @updated_at)
+  `).run(row);
+  return getApiToken(row.id);
+}
+
+export function updateApiToken(id, patch) {
+  const current = getApiToken(id);
+  if (!current) return null;
+  const next = {
+    id,
+    name: patch.name ?? current.name,
+    permissions: json(patch.permissions ?? current.permissions),
+    enabled: patch.enabled === undefined ? Number(current.enabled) : (patch.enabled ? 1 : 0),
+    revoked_at: Object.hasOwn(patch, "revokedAt") ? patch.revokedAt : current.revoked_at,
+    updated_at: now()
+  };
+  db.prepare(`
+    UPDATE api_tokens
+    SET name = @name,
+        permissions = @permissions,
+        enabled = @enabled,
+        revoked_at = @revoked_at,
+        updated_at = @updated_at
+    WHERE id = @id
+  `).run(next);
+  return getApiToken(id);
+}
+
+export function revokeApiToken(id) {
+  return updateApiToken(id, { enabled: false, revokedAt: now() });
+}
+
+export function touchApiToken(id) {
+  if (id === "env") return;
+  db.prepare("UPDATE api_tokens SET last_used_at = ?, updated_at = ? WHERE id = ?").run(now(), now(), id);
+}
+
+export function getApiToken(id) {
+  return mapApiToken(db.prepare("SELECT * FROM api_tokens WHERE id = ?").get(id));
+}
+
+export function getApiTokenByHash(tokenHash) {
+  return mapApiToken(db.prepare("SELECT * FROM api_tokens WHERE token_hash = ?").get(tokenHash));
+}
+
+export function listApiTokens() {
+  return db.prepare("SELECT * FROM api_tokens ORDER BY created_at DESC").all().map(mapApiToken);
+}
+
 function seedAdminUser() {
   const count = db.prepare("SELECT COUNT(*) AS count FROM users").get().count;
   if (count > 0 || !config.webAdminUsername || !config.webAdminPassword) return;
@@ -545,7 +630,14 @@ function seedAdminUser() {
     username: config.webAdminUsername,
     displayName: config.webAdminUsername,
     passwordHash: `pbkdf2_sha256$${salt}$${hash}`,
-    role: "admin",
+    role: "superadmin",
     enabled: true
   });
+}
+
+function ensureSuperAdminUser() {
+  const count = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'superadmin'").get().count;
+  if (count > 0 || !config.webAdminUsername) return;
+  db.prepare("UPDATE users SET role = 'superadmin', updated_at = ? WHERE username = ?")
+    .run(now(), config.webAdminUsername);
 }

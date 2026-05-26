@@ -1,16 +1,29 @@
 import crypto from "node:crypto";
 import {
+  getApiTokenByHash,
   createSession,
   deleteSession,
   getSession,
   getUserByUsername,
   touchSession
 } from "./db.js";
+import { config } from "./config.js";
 
 const SESSION_COOKIE = "wah_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
 export const roles = {
+  superadmin: [
+    "clients:read",
+    "clients:delete",
+    "tasks:read",
+    "tasks:send",
+    "messages:read",
+    "requests:read",
+    "webhooks:manage",
+    "users:manage",
+    "api_tokens:manage"
+  ],
   admin: [
     "clients:read",
     "clients:delete",
@@ -34,6 +47,19 @@ export const roles = {
     "messages:read"
   ]
 };
+
+export const apiPermissions = [
+  "agent:connect",
+  "clients:read",
+  "clients:delete",
+  "tasks:read",
+  "tasks:send",
+  "tasks:assign",
+  "messages:read",
+  "requests:read",
+  "webhooks:manage",
+  "uploads:create"
+];
 
 export function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.pbkdf2Sync(String(password), salt, 310_000, 32, "sha256").toString("hex");
@@ -84,6 +110,32 @@ export function requirePermission(permission) {
 
 export function hasPermission(user, permission) {
   return roles[user.role]?.includes(permission) || false;
+}
+
+export function generateApiToken() {
+  return `wah_${crypto.randomBytes(32).toString("base64url")}`;
+}
+
+export function hashApiToken(token) {
+  return crypto.createHash("sha256").update(String(token)).digest("hex");
+}
+
+export function authenticateApiToken(rawToken, requiredPermission) {
+  if (!rawToken) return null;
+  if (rawToken === config.apiToken) {
+    return {
+      id: "env",
+      name: "Environment token",
+      permissions: ["*"],
+      is_env_token: true
+    };
+  }
+  const token = getApiTokenByHash(hashApiToken(rawToken));
+  if (!token || !token.enabled || token.revoked_at) return null;
+  if (requiredPermission && !token.permissions.includes(requiredPermission) && !token.permissions.includes("*")) {
+    return null;
+  }
+  return token;
 }
 
 export function loginUser(username, password, req) {

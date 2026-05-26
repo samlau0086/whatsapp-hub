@@ -9,6 +9,8 @@ const state = {
   chats: [],
   apiRequests: [],
   users: [],
+  apiTokens: [],
+  apiTokenPermissions: [],
   socket: null,
   clientFilter: "all",
   selectedClientId: "",
@@ -344,9 +346,36 @@ function render() {
         <span>${escapeHtml(user.username)} / ${escapeHtml(user.role)}</span>
       </div>
       <span class="badge ${user.enabled ? "status-ok" : "status-warn"}">${user.enabled ? "enabled" : "disabled"}</span>
+      <select data-user-role="${escapeHtml(user.id)}">
+        ${Object.keys(state.roles).map((role) => `<option value="${escapeHtml(role)}" ${role === user.role ? "selected" : ""}>${escapeHtml(role)}</option>`).join("")}
+      </select>
+      <input type="password" data-user-password="${escapeHtml(user.id)}" placeholder="New password" />
+      <button class="ghost-button" type="button" data-reset-password="${escapeHtml(user.id)}">Set password</button>
+      <button class="ghost-button" type="button" data-toggle-user="${escapeHtml(user.id)}">${user.enabled ? "Disable" : "Enable"}</button>
       <button class="ghost-button" type="button" data-delete-user="${escapeHtml(user.id)}">Delete</button>
     </article>
   `).join("") : `<div class="empty-state">${escapeHtml(t("noUsers"))}</div>`;
+
+  $("tokens-panel").hidden = !can("api_tokens:manage");
+  $("api-tokens").innerHTML = state.apiTokens.length ? state.apiTokens.map((token) => `
+    <article class="token-item">
+      <div>
+        <strong>${escapeHtml(token.name)}</strong>
+        <span>${escapeHtml(token.id)} / ${token.enabled ? "enabled" : "disabled"}${token.revoked_at ? " / revoked" : ""}</span>
+        <span>last used: ${escapeHtml(token.last_used_at ? fmt(token.last_used_at) : "-")}</span>
+      </div>
+      <div class="permission-grid">
+        ${state.apiTokenPermissions.map((permission) => `
+          <label>
+            <input type="checkbox" data-token-permission="${escapeHtml(token.id)}" value="${escapeHtml(permission)}" ${token.permissions.includes(permission) ? "checked" : ""} ${token.revoked_at ? "disabled" : ""} />
+            ${escapeHtml(permission)}
+          </label>
+        `).join("")}
+      </div>
+      <button class="ghost-button" type="button" data-save-token="${escapeHtml(token.id)}" ${token.revoked_at ? "disabled" : ""}>Save</button>
+      <button class="ghost-button danger-button" type="button" data-revoke-token="${escapeHtml(token.id)}" ${token.revoked_at ? "disabled" : ""}>Revoke</button>
+    </article>
+  `).join("") : `<div class="empty-state">No API tokens.</div>`;
 
   $("send-form").querySelector("button[type='submit']").disabled = !can("tasks:send");
   document.querySelectorAll(".filter-button").forEach((button) => {
@@ -401,14 +430,16 @@ async function load() {
   });
   state.user = me.user;
   state.roles = me.roles;
+  state.apiTokenPermissions = me.apiPermissions || [];
 
-  const [clients, tasks, messages, chats, requests, users] = await Promise.all([
+  const [clients, tasks, messages, chats, requests, users, tokens] = await Promise.all([
     can("clients:read") ? api("/admin/api/clients") : Promise.resolve({ clients: [] }),
     can("tasks:read") ? api("/admin/api/tasks?limit=50") : Promise.resolve({ tasks: [] }),
     can("messages:read") ? api("/admin/api/messages?limit=50") : Promise.resolve({ messages: [] }),
     can("messages:read") && state.selectedClientId ? api(`/admin/api/chats?clientId=${encodeURIComponent(state.selectedClientId)}&limit=100`) : Promise.resolve({ chats: [] }),
     can("requests:read") ? api("/admin/api/requests?limit=50") : Promise.resolve({ requests: [] }),
-    can("users:manage") ? api("/admin/api/users") : Promise.resolve({ users: [] })
+    can("users:manage") ? api("/admin/api/users") : Promise.resolve({ users: [] }),
+    can("api_tokens:manage") ? api("/admin/api/tokens") : Promise.resolve({ tokens: [], permissions: [] })
   ]);
   state.clients = clients.clients;
   state.tasks = tasks.tasks;
@@ -416,6 +447,8 @@ async function load() {
   state.chats = chats.chats;
   state.apiRequests = requests.requests;
   state.users = users.users;
+  state.apiTokens = tokens.tokens;
+  state.apiTokenPermissions = tokens.permissions || state.apiTokenPermissions;
   setConnectionLabel(t("connected"));
   render();
   connectSocket();
@@ -478,10 +511,65 @@ async function createUser(event) {
     .catch((error) => showToast(error.message));
 }
 
+async function createApiToken(event) {
+  event.preventDefault();
+  const name = $("token-name").value.trim();
+  if (!name) return;
+  await api("/admin/api/tokens", {
+    method: "POST",
+    body: JSON.stringify({
+      name,
+      permissions: state.apiTokenPermissions
+    })
+  })
+    .then(async ({ secret }) => {
+      $("token-create-form").reset();
+      $("token-secret").hidden = false;
+      $("token-secret").textContent = `Copy this token now. It will not be shown again: ${secret}`;
+      const tokenData = await api("/admin/api/tokens");
+      state.apiTokens = tokenData.tokens;
+      state.apiTokenPermissions = tokenData.permissions;
+      render();
+    })
+    .catch((error) => showToast(error.message));
+}
+
 function bindEvents() {
   $("logout").addEventListener("click", logout);
   $("user-form").addEventListener("submit", createUser);
+  $("token-create-form").addEventListener("submit", createApiToken);
   $("users").addEventListener("click", async (event) => {
+    const resetPassword = event.target.closest("[data-reset-password]");
+    if (resetPassword) {
+      const input = document.querySelector(`[data-user-password="${CSS.escape(resetPassword.dataset.resetPassword)}"]`);
+      const password = input?.value || "";
+      if (!password) return;
+      await api(`/admin/api/users/${resetPassword.dataset.resetPassword}`, {
+        method: "PATCH",
+        body: JSON.stringify({ password })
+      })
+        .then(() => {
+          input.value = "";
+          showToast("Password updated");
+        })
+        .catch((error) => showToast(error.message));
+      return;
+    }
+    const toggle = event.target.closest("[data-toggle-user]");
+    if (toggle) {
+      const user = state.users.find((item) => item.id === toggle.dataset.toggleUser);
+      if (!user) return;
+      await api(`/admin/api/users/${user.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: !user.enabled })
+      })
+        .then(async () => {
+          state.users = (await api("/admin/api/users")).users;
+          render();
+        })
+        .catch((error) => showToast(error.message));
+      return;
+    }
     const button = event.target.closest("[data-delete-user]");
     if (!button) return;
     await api(`/admin/api/users/${button.dataset.deleteUser}`, { method: "DELETE" })
@@ -491,6 +579,49 @@ function bindEvents() {
         render();
       })
       .catch((error) => showToast(error.message));
+  });
+
+  $("users").addEventListener("change", async (event) => {
+    const roleSelect = event.target.closest("[data-user-role]");
+    if (!roleSelect) return;
+    await api(`/admin/api/users/${roleSelect.dataset.userRole}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role: roleSelect.value })
+    })
+      .then(async () => {
+        state.users = (await api("/admin/api/users")).users;
+        render();
+      })
+      .catch((error) => showToast(error.message));
+  });
+
+  $("api-tokens").addEventListener("click", async (event) => {
+    const save = event.target.closest("[data-save-token]");
+    if (save) {
+      const tokenId = save.dataset.saveToken;
+      const permissions = Array.from(document.querySelectorAll(`[data-token-permission="${CSS.escape(tokenId)}"]:checked`)).map((input) => input.value);
+      await api(`/admin/api/tokens/${tokenId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ permissions })
+      })
+        .then(async () => {
+          const tokenData = await api("/admin/api/tokens");
+          state.apiTokens = tokenData.tokens;
+          render();
+        })
+        .catch((error) => showToast(error.message));
+      return;
+    }
+    const revoke = event.target.closest("[data-revoke-token]");
+    if (revoke) {
+      await api(`/admin/api/tokens/${revoke.dataset.revokeToken}/revoke`, { method: "POST" })
+        .then(async () => {
+          const tokenData = await api("/admin/api/tokens");
+          state.apiTokens = tokenData.tokens;
+          render();
+        })
+        .catch((error) => showToast(error.message));
+    }
   });
 
   $("refresh").addEventListener("click", () => {

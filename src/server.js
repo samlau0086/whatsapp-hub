@@ -7,6 +7,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   hashPassword,
+  apiPermissions,
+  authenticateApiToken,
+  generateApiToken,
+  hashApiToken,
   loginUser,
   logoutUser,
   publicUser,
@@ -21,6 +25,7 @@ import {
   createTask,
   createUser,
   assignTask,
+  createApiToken,
   createWebhook,
   deleteUser,
   deleteWebhook,
@@ -29,6 +34,7 @@ import {
   getUser,
   findLastOutboundClientForTarget,
   listApiRequests,
+  listApiTokens,
   listClients,
   listChats,
   listMessages,
@@ -37,7 +43,10 @@ import {
   listWebhooks,
   purgeClientData,
   removeClient,
+  revokeApiToken,
   setClientStatus,
+  touchApiToken,
+  updateApiToken,
   updateUser
 } from "./db.js";
 import { chooseClient, createHub, forgetClientSocket, reconcileClientPresence } from "./hub.js";
@@ -58,7 +67,7 @@ app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public"), { index: false }));
 app.use("/uploads", (req, res, next) => {
   const token = req.header("x-hub-token") || req.query.token;
-  if (token === config.apiToken || req.header("cookie")) return next();
+  if (authenticateApiToken(token, "uploads:create") || req.header("cookie")) return next();
   return res.status(401).send("unauthorized");
 }, express.static(path.resolve(config.uploadDir)));
 
@@ -84,7 +93,7 @@ app.post("/auth/logout", (req, res) => {
 });
 
 app.get("/admin/api/me", requireWebSession, (req, res) => {
-  res.json({ user: req.user, roles });
+  res.json({ user: req.user, roles, apiPermissions });
 });
 
 app.get("/admin/api/clients", requireWebSession, requirePermission("clients:read"), (req, res) => {
@@ -205,6 +214,41 @@ app.delete("/admin/api/users/:id", requireWebSession, requirePermission("users:m
   res.json({ ok: deleteUser(req.params.id) });
 });
 
+app.get("/admin/api/tokens", requireWebSession, requirePermission("api_tokens:manage"), (req, res) => {
+  res.json({ tokens: listApiTokens().map(publicApiToken), permissions: apiPermissions });
+});
+
+app.post("/admin/api/tokens", requireWebSession, requirePermission("api_tokens:manage"), (req, res) => {
+  const { name, permissions, enabled } = req.body || {};
+  if (!name) return res.status(400).json({ error: "name is required" });
+  const invalid = (permissions || []).filter((permission) => !apiPermissions.includes(permission));
+  if (invalid.length) return res.status(400).json({ error: `invalid permissions: ${invalid.join(", ")}` });
+  const rawToken = generateApiToken();
+  const token = createApiToken({
+    name,
+    tokenHash: hashApiToken(rawToken),
+    permissions: permissions || [],
+    enabled: enabled !== false,
+    createdBy: req.user.id
+  });
+  res.status(201).json({ token: publicApiToken(token), secret: rawToken });
+});
+
+app.patch("/admin/api/tokens/:id", requireWebSession, requirePermission("api_tokens:manage"), (req, res) => {
+  const { name, permissions, enabled } = req.body || {};
+  const invalid = permissions ? permissions.filter((permission) => !apiPermissions.includes(permission)) : [];
+  if (invalid.length) return res.status(400).json({ error: `invalid permissions: ${invalid.join(", ")}` });
+  const token = updateApiToken(req.params.id, { name, permissions, enabled });
+  if (!token) return res.status(404).json({ error: "token not found" });
+  res.json({ token: publicApiToken(token) });
+});
+
+app.post("/admin/api/tokens/:id/revoke", requireWebSession, requirePermission("api_tokens:manage"), (req, res) => {
+  const token = revokeApiToken(req.params.id);
+  if (!token) return res.status(404).json({ error: "token not found" });
+  res.json({ token: publicApiToken(token) });
+});
+
 app.use("/api", (req, res, next) => {
   const startedAt = Date.now();
   res.on("finish", () => {
@@ -227,9 +271,12 @@ app.use("/api", (req, res, next) => {
 
 app.use("/api", (req, res, next) => {
   const token = req.header("x-hub-token") || req.query.token;
-  if (token !== config.apiToken) {
+  const apiToken = authenticateApiToken(token);
+  if (!apiToken) {
     return res.status(401).json({ error: "unauthorized" });
   }
+  req.apiToken = apiToken;
+  touchApiToken(apiToken.id);
   next();
 });
 
@@ -238,17 +285,20 @@ app.get("/health", (req, res) => {
 });
 
 app.get("/api/clients", (req, res) => {
+  if (!hasApiPermission(req, "clients:read")) return res.status(403).json({ error: "forbidden" });
   reconcileClientPresence();
   res.json({ clients: listClients() });
 });
 
 app.get("/api/clients/:id", (req, res) => {
+  if (!hasApiPermission(req, "clients:read")) return res.status(403).json({ error: "forbidden" });
   const client = getClient(req.params.id);
   if (!client) return res.status(404).json({ error: "client not found" });
   res.json({ client });
 });
 
 app.delete("/api/clients/:id", (req, res) => {
+  if (!hasApiPermission(req, "clients:delete")) return res.status(403).json({ error: "forbidden" });
   forgetClientSocket(req.params.id);
   setClientStatus(req.params.id, "offline");
   const deleted = removeClient(req.params.id);
@@ -256,15 +306,18 @@ app.delete("/api/clients/:id", (req, res) => {
 });
 
 app.delete("/api/clients/:id/data", (req, res) => {
+  if (!hasApiPermission(req, "clients:delete")) return res.status(403).json({ error: "forbidden" });
   forgetClientSocket(req.params.id);
   res.json({ ok: true, deleted: purgeClientData(req.params.id) });
 });
 
 app.get("/api/clients/:id/messages", (req, res) => {
+  if (!hasApiPermission(req, "messages:read")) return res.status(403).json({ error: "forbidden" });
   res.json({ messages: listMessages({ clientId: req.params.id, limit: req.query.limit }) });
 });
 
 app.get("/api/messages", (req, res) => {
+  if (!hasApiPermission(req, "messages:read")) return res.status(403).json({ error: "forbidden" });
   res.json({
     messages: listMessages({
       clientId: req.query.clientId,
@@ -277,10 +330,12 @@ app.get("/api/messages", (req, res) => {
 });
 
 app.get("/api/chats", (req, res) => {
+  if (!hasApiPermission(req, "messages:read")) return res.status(403).json({ error: "forbidden" });
   res.json({ chats: listChats({ clientId: req.query.clientId, limit: req.query.limit }) });
 });
 
 app.get("/api/requests", (req, res) => {
+  if (!hasApiPermission(req, "requests:read")) return res.status(403).json({ error: "forbidden" });
   res.json({
     requests: listApiRequests({
       method: req.query.method,
@@ -291,6 +346,7 @@ app.get("/api/requests", (req, res) => {
 });
 
 app.post("/api/uploads", upload.single("file"), (req, res) => {
+  if (!hasApiPermission(req, "uploads:create")) return res.status(403).json({ error: "forbidden" });
   if (!req.file) return res.status(400).json({ error: "file is required" });
   res.status(201).json({
     file: {
@@ -305,21 +361,25 @@ app.post("/api/uploads", upload.single("file"), (req, res) => {
 });
 
 app.post("/api/tasks/send-message", async (req, res) => {
+  if (!hasApiPermission(req, "tasks:send")) return res.status(403).json({ error: "forbidden" });
   const dispatched = await createAndDispatchMessageTask(req, res);
   if (dispatched) res.status(202).json({ task: dispatched });
 });
 
 app.get("/api/tasks", (req, res) => {
+  if (!hasApiPermission(req, "tasks:read")) return res.status(403).json({ error: "forbidden" });
   res.json({ tasks: listTasks({ clientId: req.query.clientId, status: req.query.status, limit: req.query.limit }) });
 });
 
 app.get("/api/tasks/:id", (req, res) => {
+  if (!hasApiPermission(req, "tasks:read")) return res.status(403).json({ error: "forbidden" });
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: "task not found" });
   res.json({ task });
 });
 
 app.patch("/api/tasks/:id/assign", async (req, res) => {
+  if (!hasApiPermission(req, "tasks:assign")) return res.status(403).json({ error: "forbidden" });
   const { clientId } = req.body || {};
   if (!clientId) return res.status(400).json({ error: "clientId is required" });
   if (!getClient(clientId)) return res.status(404).json({ error: "client not found" });
@@ -330,16 +390,19 @@ app.patch("/api/tasks/:id/assign", async (req, res) => {
 });
 
 app.get("/api/webhooks", (req, res) => {
+  if (!hasApiPermission(req, "webhooks:manage")) return res.status(403).json({ error: "forbidden" });
   res.json({ webhooks: listWebhooks() });
 });
 
 app.post("/api/webhooks", (req, res) => {
+  if (!hasApiPermission(req, "webhooks:manage")) return res.status(403).json({ error: "forbidden" });
   const { url, events, secret } = req.body || {};
   if (!url) return res.status(400).json({ error: "url is required" });
   res.status(201).json({ webhook: createWebhook({ url, events, secret }) });
 });
 
 app.delete("/api/webhooks/:id", (req, res) => {
+  if (!hasApiPermission(req, "webhooks:manage")) return res.status(403).json({ error: "forbidden" });
   res.json({ ok: deleteWebhook(req.params.id) });
 });
 
@@ -357,6 +420,24 @@ function sanitizeRequestBody(body) {
     }
   }
   return redacted;
+}
+
+function hasApiPermission(req, permission) {
+  return req.apiToken?.permissions?.includes("*") || req.apiToken?.permissions?.includes(permission);
+}
+
+function publicApiToken(token) {
+  return token && {
+    id: token.id,
+    name: token.name,
+    permissions: token.permissions,
+    enabled: token.enabled,
+    created_by: token.created_by,
+    created_at: token.created_at,
+    updated_at: token.updated_at,
+    last_used_at: token.last_used_at,
+    revoked_at: token.revoked_at
+  };
 }
 
 async function createAndDispatchMessageTask(req, res) {

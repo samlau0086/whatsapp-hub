@@ -622,20 +622,23 @@ p {
   white-space: nowrap;
 }
 
-.user-form {
+.user-form,
+.token-create-form {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   margin-top: 14px;
 }
 
-.user-list {
+.user-list,
+.token-list {
   display: grid;
   gap: 10px;
   margin-top: 14px;
 }
 
-.user-item {
+.user-item,
+.token-item {
   align-items: center;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -645,9 +648,34 @@ p {
   padding: 12px;
 }
 
-.user-item span {
+.user-item span,
+.token-item span {
   color: var(--muted);
   display: block;
+  font-size: 12px;
+}
+
+.token-secret {
+  background: var(--amber-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+  padding: 12px;
+}
+
+.permission-grid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.permission-grid label {
+  align-items: center;
+  display: flex;
+  gap: 6px;
   font-size: 12px;
 }
 

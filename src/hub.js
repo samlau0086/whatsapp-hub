@@ -1,5 +1,5 @@
 import { Server } from "socket.io";
-import { getSessionFromCookieHeader } from "./auth.js";
+import { authenticateApiToken, getSessionFromCookieHeader } from "./auth.js";
 import {
   createMessage,
   getClient,
@@ -25,8 +25,10 @@ export function createHub(httpServer) {
 
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token || socket.handshake.headers["x-hub-token"];
-    if (token === config.apiToken) {
+    const apiToken = authenticateApiToken(token, "agent:connect");
+    if (apiToken) {
       socket.data.kind = "agent";
+      socket.data.apiToken = apiToken;
       return next();
     }
 

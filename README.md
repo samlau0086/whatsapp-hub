@@ -27,6 +27,7 @@ flowchart LR
 - Webhook 推送 `message.created` 和 `task.updated`。
 - Web 中控实时查看 clients、tasks、messages、API requests，并手动发起发送任务。
 - Web 中控使用登录页和 session cookie，支持多用户、角色和权限管理。
+- Web 后台可生成 API token、编辑 token 权限、禁用或 revoke token，不需要在构建时固定写死 API token。
 - 集中聊天界面支持文本、emoji、图片、视频和文件发送。
 
 ## 本地开发
@@ -114,6 +115,25 @@ WEB_ADMIN_PASSWORD=replace-with-a-long-random-admin-password
 - `viewer`: 只读查看 clients/tasks/messages。
 
 外部业务系统和内网 WhatsApp client agent 不使用 Web 用户登录，仍然使用 `HUB_API_TOKEN` 调用 `/api/*` 和连接 Socket.IO。
+
+## API Token 管理
+
+超级管理员登录 Web UI 后，可以在 API Tokens 面板生成动态 token。生成时只显示一次明文 token，请立即保存。
+
+动态 token 支持以下权限：
+
+- `agent:connect`: WhatsApp client agent 连接 Socket.IO。
+- `clients:read`: 查询 clients。
+- `clients:delete`: 删除 clients 和清理 client 数据。
+- `tasks:read`: 查询任务。
+- `tasks:send`: 创建发送任务。
+- `tasks:assign`: 手动改派任务。
+- `messages:read`: 查询消息和 chats。
+- `requests:read`: 查询 API 请求记录。
+- `webhooks:manage`: 管理 webhooks。
+- `uploads:create`: 上传媒体附件。
+
+`.env` 里的 `HUB_API_TOKEN` 仍作为 bootstrap/兼容 token 保留，拥有全部权限；正式业务系统建议改用 Web 后台生成的动态 token，并按需授予最小权限。
 
 Nginx 反向代理示例，重点是保留 WebSocket upgrade：
 
