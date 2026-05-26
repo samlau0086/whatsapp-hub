@@ -618,7 +618,7 @@ export function getApiTokenByHash(tokenHash) {
 }
 
 export function listApiTokens() {
-  return db.prepare("SELECT * FROM api_tokens ORDER BY created_at DESC").all().map(mapApiToken);
+  return db.prepare("SELECT * FROM api_tokens WHERE revoked_at IS NULL ORDER BY created_at DESC").all().map(mapApiToken);
 }
 
 function seedAdminUser() {

@@ -285,6 +285,18 @@ app.get("/health", (req, res) => {
   res.json({ ok: true, service: "whatsapp-actor-hub", time: new Date().toISOString() });
 });
 
+app.get("/api/auth/check", (req, res) => {
+  res.json({
+    ok: true,
+    token: {
+      id: req.apiToken.id,
+      name: req.apiToken.name,
+      permissions: req.apiToken.permissions,
+      is_env_token: Boolean(req.apiToken.is_env_token)
+    }
+  });
+});
+
 app.get("/api/clients", (req, res) => {
   if (!hasApiPermission(req, "clients:read")) return res.status(403).json({ error: "forbidden" });
   reconcileClientPresence();

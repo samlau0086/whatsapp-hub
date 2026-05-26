@@ -365,9 +365,9 @@ function render() {
   `).join("");
   $("api-tokens").innerHTML = state.apiTokens.length ? state.apiTokens.map((token) => `
     <article class="token-item">
-      <div>
+      <div class="token-summary">
         <strong>${escapeHtml(token.name)}</strong>
-        <span>${escapeHtml(token.id)} / ${token.enabled ? "enabled" : "disabled"}${token.revoked_at ? " / revoked" : ""}</span>
+        <span>${escapeHtml(token.id)} / ${token.enabled ? "enabled" : "disabled"}</span>
         <span>last used: ${escapeHtml(token.last_used_at ? fmt(token.last_used_at) : "-")}</span>
       </div>
       <div class="permission-grid">
@@ -378,8 +378,10 @@ function render() {
           </label>
         `).join("")}
       </div>
-      <button class="ghost-button" type="button" data-save-token="${escapeHtml(token.id)}" ${token.revoked_at ? "disabled" : ""}>Save</button>
-      <button class="ghost-button danger-button" type="button" data-revoke-token="${escapeHtml(token.id)}" ${token.revoked_at ? "disabled" : ""}>Revoke</button>
+      <div class="token-actions">
+        <button class="ghost-button" type="button" data-save-token="${escapeHtml(token.id)}">Save</button>
+        <button class="ghost-button danger-button" type="button" data-revoke-token="${escapeHtml(token.id)}">Revoke</button>
+      </div>
     </article>
   `).join("") : `<div class="empty-state">No API tokens.</div>`;
 
@@ -532,11 +534,17 @@ async function createApiToken(event) {
       name,
       permissions
     })
-  })
+    })
     .then(async ({ secret }) => {
       $("token-create-form").reset();
       $("token-secret").hidden = false;
-      $("token-secret").textContent = `Copy this token now. It will not be shown again: ${secret}`;
+      $("token-secret").innerHTML = `
+        <span>Copy this token now. It will not be shown again.</span>
+        <div class="token-secret-row">
+          <input id="generated-token-value" value="${escapeHtml(secret)}" readonly />
+          <button class="ghost-button" type="button" data-copy-generated-token>Copy</button>
+        </div>
+      `;
       const tokenData = await api("/admin/api/tokens");
       state.apiTokens = tokenData.tokens;
       state.apiTokenPermissions = tokenData.permissions;
@@ -549,6 +557,14 @@ function bindEvents() {
   $("logout").addEventListener("click", logout);
   $("user-form").addEventListener("submit", createUser);
   $("token-create-form").addEventListener("submit", createApiToken);
+  $("token-secret").addEventListener("click", async (event) => {
+    const copy = event.target.closest("[data-copy-generated-token]");
+    if (!copy) return;
+    const input = $("generated-token-value");
+    input.select();
+    await navigator.clipboard?.writeText(input.value).catch(() => document.execCommand("copy"));
+    showToast("Token copied");
+  });
   $("users").addEventListener("click", async (event) => {
     const resetPassword = event.target.closest("[data-reset-password]");
     if (resetPassword) {

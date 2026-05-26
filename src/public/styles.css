@@ -657,13 +657,21 @@ p {
 
 .user-item,
 .token-item {
-  align-items: center;
   border: 1px solid var(--line);
   border-radius: 8px;
   display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
   padding: 12px;
+}
+
+.user-item {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.token-summary {
+  min-width: 0;
 }
 
 .user-item span,
@@ -682,6 +690,26 @@ p {
   margin-top: 12px;
   overflow-wrap: anywhere;
   padding: 12px;
+}
+
+.token-secret span {
+  display: block;
+  font-family: inherit;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.token-secret-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.token-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .permission-grid {

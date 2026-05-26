@@ -147,12 +147,14 @@ export function getApiTokenFromRequest(req) {
 }
 
 export function normalizeApiToken(rawToken) {
-  const token = String(rawToken || "").trim();
+  const token = String(rawToken || "").trim().replace(/^["']|["']$/g, "");
   if (!token) return "";
   const bearer = token.match(/^Bearer\s+(.+)$/i);
   if (bearer) return bearer[1].trim();
   const tokenScheme = token.match(/^Token\s+(.+)$/i);
   if (tokenScheme) return tokenScheme[1].trim();
+  const embeddedToken = token.match(/\bwah_[A-Za-z0-9_-]+\b/);
+  if (embeddedToken) return embeddedToken[0];
   return token;
 }
 
