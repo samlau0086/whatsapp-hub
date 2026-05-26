@@ -121,8 +121,9 @@ export function hashApiToken(token) {
 }
 
 export function authenticateApiToken(rawToken, requiredPermission) {
-  if (!rawToken) return null;
-  if (rawToken === config.apiToken) {
+  const normalizedToken = normalizeApiToken(rawToken);
+  if (!normalizedToken) return null;
+  if (normalizedToken === config.apiToken) {
     return {
       id: "env",
       name: "Environment token",
@@ -130,11 +131,28 @@ export function authenticateApiToken(rawToken, requiredPermission) {
       is_env_token: true
     };
   }
-  const token = getApiTokenByHash(hashApiToken(rawToken));
+  const token = getApiTokenByHash(hashApiToken(normalizedToken));
   if (!token || !token.enabled || token.revoked_at) return null;
   if (requiredPermission && !token.permissions.includes(requiredPermission) && !token.permissions.includes("*")) {
     return null;
   }
+  return token;
+}
+
+export function getApiTokenFromRequest(req) {
+  return req.header("x-hub-token")
+    || req.header("x-api-token")
+    || req.header("authorization")
+    || req.query.token;
+}
+
+export function normalizeApiToken(rawToken) {
+  const token = String(rawToken || "").trim();
+  if (!token) return "";
+  const bearer = token.match(/^Bearer\s+(.+)$/i);
+  if (bearer) return bearer[1].trim();
+  const tokenScheme = token.match(/^Token\s+(.+)$/i);
+  if (tokenScheme) return tokenScheme[1].trim();
   return token;
 }
 

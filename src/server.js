@@ -10,6 +10,7 @@ import {
   apiPermissions,
   authenticateApiToken,
   generateApiToken,
+  getApiTokenFromRequest,
   hashApiToken,
   loginUser,
   logoutUser,
@@ -66,7 +67,7 @@ app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public"), { index: false }));
 app.use("/uploads", (req, res, next) => {
-  const token = req.header("x-hub-token") || req.query.token;
+  const token = getApiTokenFromRequest(req);
   if (authenticateApiToken(token, "uploads:create") || req.header("cookie")) return next();
   return res.status(401).send("unauthorized");
 }, express.static(path.resolve(config.uploadDir)));
@@ -270,7 +271,7 @@ app.use("/api", (req, res, next) => {
 });
 
 app.use("/api", (req, res, next) => {
-  const token = req.header("x-hub-token") || req.query.token;
+  const token = getApiTokenFromRequest(req);
   const apiToken = authenticateApiToken(token);
   if (!apiToken) {
     return res.status(401).json({ error: "unauthorized" });
