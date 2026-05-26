@@ -357,6 +357,12 @@ function render() {
   `).join("") : `<div class="empty-state">${escapeHtml(t("noUsers"))}</div>`;
 
   $("tokens-panel").hidden = !can("api_tokens:manage");
+  $("token-create-permissions").innerHTML = state.apiTokenPermissions.map((permission) => `
+    <label>
+      <input type="checkbox" data-create-token-permission value="${escapeHtml(permission)}" checked />
+      ${escapeHtml(permission)}
+    </label>
+  `).join("");
   $("api-tokens").innerHTML = state.apiTokens.length ? state.apiTokens.map((token) => `
     <article class="token-item">
       <div>
@@ -515,11 +521,16 @@ async function createApiToken(event) {
   event.preventDefault();
   const name = $("token-name").value.trim();
   if (!name) return;
+  const permissions = Array.from(document.querySelectorAll("[data-create-token-permission]:checked")).map((input) => input.value);
+  if (!permissions.length) {
+    showToast("Select at least one permission");
+    return;
+  }
   await api("/admin/api/tokens", {
     method: "POST",
     body: JSON.stringify({
       name,
-      permissions: state.apiTokenPermissions
+      permissions
     })
   })
     .then(async ({ secret }) => {

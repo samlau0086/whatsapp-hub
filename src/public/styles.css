@@ -630,6 +630,24 @@ p {
   margin-top: 14px;
 }
 
+.token-create-form input {
+  grid-column: 1 / 5;
+  grid-row: 1;
+}
+
+.token-create-form button {
+  grid-column: 5 / 6;
+  grid-row: 1;
+}
+
+.token-create-permissions {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  padding: 10px;
+}
+
 .user-list,
 .token-list {
   display: grid;
@@ -837,6 +855,7 @@ p {
   .theme-switch,
   .user-menu,
   .user-form,
+  .token-create-form,
   .user-item,
   .send-form {
     grid-template-columns: 1fr;
@@ -853,5 +872,12 @@ p {
 
   .send-form .message-input {
     grid-column: 1;
+  }
+
+  .token-create-form input,
+  .token-create-form button,
+  .token-create-permissions {
+    grid-column: 1;
+    grid-row: auto;
   }
 }
