@@ -23,6 +23,7 @@ import {
 import { config } from "./config.js";
 import {
   createApiRequest,
+  createClientConfig,
   createTask,
   createUser,
   assignTask,
@@ -31,11 +32,13 @@ import {
   deleteUser,
   deleteWebhook,
   getClient,
+  getClientConfigByClientId,
   getTask,
   getUser,
   findLastOutboundClientForTarget,
   listApiRequests,
   listApiTokens,
+  listClientConfigs,
   listClients,
   listChats,
   listMessages,
@@ -80,6 +83,14 @@ app.get("/login", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
 
+app.get("/agent/wwebjs-client.js", (req, res) => {
+  res.type("text/javascript").sendFile(path.join(__dirname, "..", "agents", "wwebjs-client", "index.js"));
+});
+
+app.get("/agent/package.json", (req, res) => {
+  res.json(agentPackageJson());
+});
+
 app.post("/auth/login", (req, res) => {
   const { username, password } = req.body || {};
   const result = loginUser(username, password, req);
@@ -100,6 +111,47 @@ app.get("/admin/api/me", requireWebSession, (req, res) => {
 app.get("/admin/api/clients", requireWebSession, requirePermission("clients:read"), (req, res) => {
   reconcileClientPresence();
   res.json({ clients: listClients() });
+});
+
+app.get("/admin/api/client-configs", requireWebSession, requirePermission("clients:read"), (req, res) => {
+  res.json({ clientConfigs: listClientConfigs().map(publicClientConfig) });
+});
+
+app.post("/admin/api/client-configs", requireWebSession, requirePermission("clients:delete"), (req, res) => {
+  const payload = req.body || {};
+  const clientId = String(payload.clientId || "").trim();
+  const name = String(payload.name || clientId).trim();
+  if (!clientId) return res.status(400).json({ error: "clientId is required" });
+  if (!/^[a-zA-Z0-9_.-]{2,64}$/.test(clientId)) {
+    return res.status(400).json({ error: "clientId may contain letters, numbers, dot, underscore, and dash only" });
+  }
+  if (getClientConfigByClientId(clientId)) return res.status(409).json({ error: "client config already exists" });
+
+  const rawToken = generateApiToken();
+  const apiToken = createApiToken({
+    name: `agent:${clientId}`,
+    tokenHash: hashApiToken(rawToken),
+    permissions: ["agent:connect", "uploads:create"],
+    enabled: true,
+    createdBy: req.user.id
+  });
+  const clientConfig = createClientConfig({
+    clientId,
+    name,
+    hubUrl: String(payload.hubUrl || config.publicBaseUrl).trim(),
+    authDataPath: String(payload.authDataPath || `./.wwebjs_auth_${clientId}`).trim(),
+    cachePath: String(payload.cachePath || `./.wwebjs_cache_${clientId}`).trim(),
+    proxyUrl: String(payload.proxyUrl || "").trim(),
+    proxyUsername: String(payload.proxyUsername || "").trim(),
+    proxyPassword: String(payload.proxyPassword || ""),
+    headless: payload.headless !== false,
+    apiTokenId: apiToken.id,
+    createdBy: req.user.id
+  });
+  res.status(201).json({
+    clientConfig: publicClientConfig(clientConfig),
+    deployment: buildClientDeployment(clientConfig, rawToken)
+  });
 });
 
 app.delete("/admin/api/clients/:id", requireWebSession, requirePermission("clients:delete"), (req, res) => {
@@ -451,6 +503,89 @@ function publicApiToken(token) {
     last_used_at: token.last_used_at,
     revoked_at: token.revoked_at
   };
+}
+
+function publicClientConfig(clientConfig) {
+  return clientConfig && {
+    id: clientConfig.id,
+    client_id: clientConfig.client_id,
+    name: clientConfig.name,
+    hub_url: clientConfig.hub_url,
+    auth_data_path: clientConfig.auth_data_path,
+    cache_path: clientConfig.cache_path,
+    proxy_url: clientConfig.proxy_url,
+    proxy_username: clientConfig.proxy_username,
+    headless: clientConfig.headless,
+    api_token_id: clientConfig.api_token_id,
+    created_at: clientConfig.created_at,
+    updated_at: clientConfig.updated_at
+  };
+}
+
+function agentPackageJson() {
+  return {
+    name: "whatsapp-hub-client-agent",
+    version: "0.1.0",
+    private: true,
+    type: "module",
+    scripts: {
+      start: "node wwebjs-client.js"
+    },
+    dependencies: {
+      dotenv: "^16.4.7",
+      "qrcode-terminal": "^0.12.0",
+      "socket.io-client": "^4.8.1",
+      "whatsapp-web.js": "^1.34.7"
+    }
+  };
+}
+
+function buildClientDeployment(clientConfig, token) {
+  const env = [
+    ["HUB_URL", clientConfig.hub_url],
+    ["CLIENT_ID", clientConfig.client_id],
+    ["CLIENT_NAME", clientConfig.name],
+    ["CLIENT_TOKEN", token],
+    ["WWEBJS_AUTH_DATA_PATH", clientConfig.auth_data_path],
+    ["WWEBJS_CACHE_PATH", clientConfig.cache_path],
+    ["CLIENT_PROXY_URL", clientConfig.proxy_url || ""],
+    ["CLIENT_PROXY_USERNAME", clientConfig.proxy_username || ""],
+    ["CLIENT_PROXY_PASSWORD", clientConfig.proxy_password || ""],
+    ["PUPPETEER_HEADLESS", clientConfig.headless ? "true" : "false"]
+  ].map(([key, value]) => `${key}=${quoteEnv(value)}`).join("\n");
+
+  const agentBaseUrl = new URL("/agent/", clientConfig.hub_url).toString();
+  return {
+    env,
+    agentUrl: new URL("wwebjs-client.js", agentBaseUrl).toString(),
+    packageUrl: new URL("package.json", agentBaseUrl).toString(),
+    linux: [
+      `mkdir -p whatsapp-agent-${clientConfig.client_id}`,
+      `cd whatsapp-agent-${clientConfig.client_id}`,
+      `curl -fsSL ${new URL("package.json", agentBaseUrl).toString()} -o package.json`,
+      `curl -fsSL ${new URL("wwebjs-client.js", agentBaseUrl).toString()} -o wwebjs-client.js`,
+      "cat > .env <<'EOF'",
+      env,
+      "EOF",
+      "npm install",
+      "npm start"
+    ].join("\n"),
+    windowsPowerShell: [
+      `New-Item -ItemType Directory -Force whatsapp-agent-${clientConfig.client_id} | Out-Null`,
+      `Set-Location whatsapp-agent-${clientConfig.client_id}`,
+      `Invoke-WebRequest "${new URL("package.json", agentBaseUrl).toString()}" -OutFile package.json`,
+      `Invoke-WebRequest "${new URL("wwebjs-client.js", agentBaseUrl).toString()}" -OutFile wwebjs-client.js`,
+      "@'",
+      env,
+      "'@ | Set-Content -Encoding utf8 .env",
+      "npm install",
+      "npm start"
+    ].join("\n")
+  };
+}
+
+function quoteEnv(value) {
+  return `"${String(value || "").replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/\n/g, "\\n")}"`;
 }
 
 async function createAndDispatchMessageTask(req, res) {

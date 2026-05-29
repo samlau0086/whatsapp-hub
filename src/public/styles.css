@@ -417,6 +417,69 @@ p {
   padding: 4px;
 }
 
+.client-create-panel {
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+}
+
+.client-create-form {
+  display: grid;
+  gap: 8px;
+}
+
+.checkbox-line {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+}
+
+.checkbox-line input {
+  min-height: 0;
+  width: auto;
+}
+
+.deployment-guide {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.deployment-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.deployment-guide p,
+.deployment-guide label {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.deployment-guide pre {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+}
+
 .filter-button {
   background: transparent;
   border: 0;

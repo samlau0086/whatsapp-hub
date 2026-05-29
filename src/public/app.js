@@ -11,6 +11,8 @@ const state = {
   users: [],
   apiTokens: [],
   apiTokenPermissions: [],
+  clientConfigs: [],
+  clientDeployment: null,
   socket: null,
   clientFilter: "all",
   selectedClientId: "",
@@ -243,6 +245,9 @@ function render() {
   $("chat-summary").textContent = activeClient ? activeClient.id : t("selectClient");
   $("active-chat-title").textContent = state.selectedChatId || t("noChatSelected");
   $("active-chat-subtitle").textContent = activeClient ? activeClient.name || activeClient.id : t("selectChat");
+  $("client-create-panel").hidden = !can("clients:delete");
+  $("new-client-hub-url").placeholder = window.location.origin;
+  renderDeploymentGuide();
 
   $("clients").innerHTML = visibleClients.length ? visibleClients.map((client) => `
     <article class="client-card ${client.id === state.selectedClientId ? "selected" : ""}" data-client-id="${escapeHtml(client.id)}">
@@ -430,6 +435,29 @@ function showToast(message) {
   showToast.timer = setTimeout(() => toast.classList.remove("show"), 2600);
 }
 
+function renderDeploymentGuide() {
+  const container = $("client-deployment");
+  if (!state.clientDeployment) {
+    container.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+  container.hidden = false;
+  container.innerHTML = `
+    <div class="deployment-head">
+      <strong>Client deployment</strong>
+      <button class="ghost-button" type="button" data-copy-deployment>Copy Linux guide</button>
+    </div>
+    <p>Run this on the internal-network computer. It downloads only the agent script and package file.</p>
+    <label>.env</label>
+    <pre>${escapeHtml(state.clientDeployment.env)}</pre>
+    <label>Linux / macOS</label>
+    <pre>${escapeHtml(state.clientDeployment.linux)}</pre>
+    <label>Windows PowerShell</label>
+    <pre>${escapeHtml(state.clientDeployment.windowsPowerShell)}</pre>
+  `;
+}
+
 async function load() {
   setConnectionLabel(t("loading"));
   const me = await api("/admin/api/me").catch((error) => {
@@ -440,14 +468,15 @@ async function load() {
   state.roles = me.roles;
   state.apiTokenPermissions = me.apiPermissions || [];
 
-  const [clients, tasks, messages, chats, requests, users, tokens] = await Promise.all([
+  const [clients, tasks, messages, chats, requests, users, tokens, clientConfigs] = await Promise.all([
     can("clients:read") ? api("/admin/api/clients") : Promise.resolve({ clients: [] }),
     can("tasks:read") ? api("/admin/api/tasks?limit=50") : Promise.resolve({ tasks: [] }),
     can("messages:read") ? api("/admin/api/messages?limit=50") : Promise.resolve({ messages: [] }),
     can("messages:read") && state.selectedClientId ? api(`/admin/api/chats?clientId=${encodeURIComponent(state.selectedClientId)}&limit=100`) : Promise.resolve({ chats: [] }),
     can("requests:read") ? api("/admin/api/requests?limit=50") : Promise.resolve({ requests: [] }),
     can("users:manage") ? api("/admin/api/users") : Promise.resolve({ users: [] }),
-    can("api_tokens:manage") ? api("/admin/api/tokens") : Promise.resolve({ tokens: [], permissions: [] })
+    can("api_tokens:manage") ? api("/admin/api/tokens") : Promise.resolve({ tokens: [], permissions: [] }),
+    can("clients:read") ? api("/admin/api/client-configs") : Promise.resolve({ clientConfigs: [] })
   ]);
   state.clients = clients.clients;
   state.tasks = tasks.tasks;
@@ -457,6 +486,7 @@ async function load() {
   state.users = users.users;
   state.apiTokens = tokens.tokens;
   state.apiTokenPermissions = tokens.permissions || state.apiTokenPermissions;
+  state.clientConfigs = clientConfigs.clientConfigs;
   setConnectionLabel(t("connected"));
   render();
   connectSocket();
@@ -553,10 +583,50 @@ async function createApiToken(event) {
     .catch((error) => showToast(error.message));
 }
 
+async function createClientConfig(event) {
+  event.preventDefault();
+  const clientId = $("new-client-id").value.trim();
+  const payload = {
+    clientId,
+    name: $("new-client-name").value.trim() || clientId,
+    hubUrl: $("new-client-hub-url").value.trim() || window.location.origin,
+    authDataPath: $("new-client-auth-path").value.trim() || `./.wwebjs_auth_${clientId}`,
+    cachePath: $("new-client-cache-path").value.trim() || `./.wwebjs_cache_${clientId}`,
+    proxyUrl: $("new-client-proxy-url").value.trim(),
+    proxyUsername: $("new-client-proxy-username").value.trim(),
+    proxyPassword: $("new-client-proxy-password").value,
+    headless: $("new-client-headless").checked
+  };
+  await api("/admin/api/client-configs", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  })
+    .then(async ({ clientConfig, deployment }) => {
+      $("client-create-form").reset();
+      $("new-client-headless").checked = true;
+      state.clientDeployment = deployment;
+      state.clientConfigs = [clientConfig, ...state.clientConfigs.filter((item) => item.id !== clientConfig.id)];
+      state.clients = (await api("/admin/api/clients")).clients;
+      showToast("Client config saved");
+      render();
+    })
+    .catch((error) => showToast(error.message));
+}
+
 function bindEvents() {
   $("logout").addEventListener("click", logout);
   $("user-form").addEventListener("submit", createUser);
   $("token-create-form").addEventListener("submit", createApiToken);
+  $("toggle-client-create").addEventListener("click", () => {
+    $("client-create-form").hidden = !$("client-create-form").hidden;
+  });
+  $("client-deployment").addEventListener("click", async (event) => {
+    const copy = event.target.closest("[data-copy-deployment]");
+    if (!copy || !state.clientDeployment) return;
+    await navigator.clipboard?.writeText(state.clientDeployment.linux).catch(() => {});
+    showToast("Deployment guide copied");
+  });
+  $("client-create-form").addEventListener("submit", createClientConfig);
   $("token-secret").addEventListener("click", async (event) => {
     const copy = event.target.closest("[data-copy-generated-token]");
     if (!copy) return;

@@ -71,6 +71,26 @@
             <button id="filter-offline" class="filter-button" type="button" data-i18n="offline">Offline</button>
           </div>
 
+          <section id="client-create-panel" class="client-create-panel">
+            <button id="toggle-client-create" class="ghost-button" type="button">New client</button>
+            <form id="client-create-form" class="client-create-form" hidden>
+              <input id="new-client-id" placeholder="client id, e.g. office-pc-01" />
+              <input id="new-client-name" placeholder="client name" />
+              <input id="new-client-hub-url" placeholder="hub url" />
+              <input id="new-client-auth-path" placeholder="auth data path" />
+              <input id="new-client-cache-path" placeholder="cache path" />
+              <input id="new-client-proxy-url" placeholder="proxy url, optional" />
+              <input id="new-client-proxy-username" placeholder="proxy username, optional" />
+              <input id="new-client-proxy-password" placeholder="proxy password, optional" type="password" />
+              <label class="checkbox-line">
+                <input id="new-client-headless" type="checkbox" checked />
+                <span>Headless browser</span>
+              </label>
+              <button type="submit">Save and generate deploy guide</button>
+            </form>
+            <div id="client-deployment" class="deployment-guide" hidden></div>
+          </section>
+
           <div id="clients" class="client-list"></div>
         </aside>
 

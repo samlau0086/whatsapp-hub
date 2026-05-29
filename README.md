@@ -828,6 +828,26 @@ Agent:
 - `CLIENT_PROXY_PASSWORD`: 代理密码。
 - `PUPPETEER_HEADLESS`: 是否无头运行 Chromium。
 
+## Web 后台新增 Client 部署
+
+超级管理员或具备 client 管理权限的用户可以在 Web 中控的 Clients 面板点击 `New client`：
+
+1. 填写 `client id`、`client name`、认证目录、缓存目录、代理等参数。
+2. 保存后 Hub 会预注册一个 offline client，并生成该 client 专用的 agent token。
+3. 页面会显示个性化部署说明，内网电脑只需要下载：
+   - `/agent/package.json`
+   - `/agent/wwebjs-client.js`
+   - 生成的 `.env`
+
+这样内网电脑无需下载整个 hub 项目代码。生成的 token 只在创建后显示在部署说明中；若丢失，建议重新创建 client 配置或生成新的 agent token。
+
+部署说明中的 token 默认只包含：
+
+- `agent:connect`
+- `uploads:create`
+
+也就是只允许 WhatsApp client agent 连接 Hub 和下载待发送媒体文件，不授予外部业务 API 的读写权限。
+
 ## 后续可扩展点
 
 - 将 SQLite 替换为 Postgres/MySQL，并加入多 hub 实例共享状态。

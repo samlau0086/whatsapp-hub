@@ -118,6 +118,27 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 );
 
 CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
+
+CREATE TABLE IF NOT EXISTS client_configs (
+  id TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  hub_url TEXT NOT NULL,
+  auth_data_path TEXT NOT NULL,
+  cache_path TEXT NOT NULL,
+  proxy_url TEXT,
+  proxy_username TEXT,
+  proxy_password TEXT,
+  headless INTEGER NOT NULL DEFAULT 1,
+  api_token_id TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(api_token_id) REFERENCES api_tokens(id) ON DELETE SET NULL,
+  FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_client_configs_client_id ON client_configs(client_id);
 `);
 
 const now = () => new Date().toISOString();
@@ -141,6 +162,7 @@ const mapApiToken = (row) => row && ({
   enabled: Boolean(row.enabled),
   permissions: parseJson(row.permissions, [])
 });
+const mapClientConfig = (row) => row && ({ ...row, headless: Boolean(row.headless) });
 
 seedAdminUser();
 ensureSuperAdminUser();
@@ -194,10 +216,18 @@ export function removeClient(id) {
 
 export function purgeClientData(id) {
   const transaction = db.transaction((clientId) => {
+    const configRows = db.prepare("SELECT api_token_id FROM client_configs WHERE client_id = ?").all(clientId);
+    for (const row of configRows) {
+      if (row.api_token_id) {
+        db.prepare("UPDATE api_tokens SET enabled = 0, revoked_at = ?, updated_at = ? WHERE id = ?")
+          .run(now(), now(), row.api_token_id);
+      }
+    }
+    const configs = db.prepare("DELETE FROM client_configs WHERE client_id = ?").run(clientId).changes;
     const messages = db.prepare("DELETE FROM messages WHERE client_id = ?").run(clientId).changes;
     const tasks = db.prepare("DELETE FROM tasks WHERE client_id = ?").run(clientId).changes;
     const clients = db.prepare("DELETE FROM clients WHERE id = ?").run(clientId).changes;
-    return { clients, tasks, messages };
+    return { clients, configs, tasks, messages };
   });
   return transaction(id);
 }
@@ -212,6 +242,81 @@ export function listClients() {
 
 export function listOnlineClients() {
   return db.prepare("SELECT * FROM clients WHERE status = 'online' ORDER BY last_seen_at DESC").all().map(mapClient);
+}
+
+export function createClientConfig({
+  clientId,
+  name,
+  hubUrl,
+  authDataPath,
+  cachePath,
+  proxyUrl = "",
+  proxyUsername = "",
+  proxyPassword = "",
+  headless = true,
+  apiTokenId = null,
+  createdBy = null
+}) {
+  const timestamp = now();
+  const id = randomUUID();
+  const transaction = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO client_configs (
+        id, client_id, name, hub_url, auth_data_path, cache_path,
+        proxy_url, proxy_username, proxy_password, headless,
+        api_token_id, created_by, created_at, updated_at
+      )
+      VALUES (
+        @id, @client_id, @name, @hub_url, @auth_data_path, @cache_path,
+        @proxy_url, @proxy_username, @proxy_password, @headless,
+        @api_token_id, @created_by, @created_at, @updated_at
+      )
+    `).run({
+      id,
+      client_id: clientId,
+      name,
+      hub_url: hubUrl,
+      auth_data_path: authDataPath,
+      cache_path: cachePath,
+      proxy_url: proxyUrl,
+      proxy_username: proxyUsername,
+      proxy_password: proxyPassword,
+      headless: headless ? 1 : 0,
+      api_token_id: apiTokenId,
+      created_by: createdBy,
+      created_at: timestamp,
+      updated_at: timestamp
+    });
+
+    db.prepare(`
+      INSERT INTO clients (id, name, phone, status, metadata, created_at, updated_at, last_seen_at)
+      VALUES (@id, @name, NULL, 'offline', @metadata, @created_at, @updated_at, NULL)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        metadata = excluded.metadata,
+        updated_at = excluded.updated_at
+    `).run({
+      id: clientId,
+      name,
+      metadata: json({ configured: true }),
+      created_at: timestamp,
+      updated_at: timestamp
+    });
+  });
+  transaction();
+  return getClientConfig(id);
+}
+
+export function getClientConfig(id) {
+  return mapClientConfig(db.prepare("SELECT * FROM client_configs WHERE id = ?").get(id));
+}
+
+export function getClientConfigByClientId(clientId) {
+  return mapClientConfig(db.prepare("SELECT * FROM client_configs WHERE client_id = ?").get(clientId));
+}
+
+export function listClientConfigs() {
+  return db.prepare("SELECT * FROM client_configs ORDER BY updated_at DESC").all().map(mapClientConfig);
 }
 
 export function createTask({ type, clientId = null, targetPhone = null, payload }) {
