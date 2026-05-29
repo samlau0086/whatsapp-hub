@@ -20,6 +20,7 @@ const config = {
   proxyUrl: process.env.CLIENT_PROXY_URL || "",
   proxyUsername: process.env.CLIENT_PROXY_USERNAME || "",
   proxyPassword: process.env.CLIENT_PROXY_PASSWORD || "",
+  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || "",
   headless: process.env.PUPPETEER_HEADLESS !== "false"
 };
 
@@ -49,6 +50,7 @@ const whatsapp = new Client({
     : {}),
   puppeteer: {
     headless: config.headless,
+    ...(config.executablePath ? { executablePath: config.executablePath } : {}),
     args: puppeteerArgs
   },
   webVersionCache: {

@@ -464,11 +464,11 @@ function renderDeploymentGuide() {
       content: state.clientDeployment.linux,
       note: `Download and run: chmod +x ${clientId}-install.sh && ./${clientId}-install.sh`
     },
-    windowsPowerShell: {
-      label: "Windows PowerShell",
-      filename: `${clientId}-install.ps1`,
-      content: state.clientDeployment.windowsPowerShell,
-      note: `Run with PowerShell, or: powershell -ExecutionPolicy Bypass -File .\\${clientId}-install.ps1`
+    windowsBat: {
+      label: "Windows BAT",
+      filename: `${clientId}-install.bat`,
+      content: state.clientDeployment.windowsBat || state.clientDeployment.windowsPowerShell || "",
+      note: `Download ${clientId}-install.bat, then double-click it. If Windows asks for permission, allow it to install Node.js.`
     }
   };
   const activeBlock = blocks[state.deploymentTab] || blocks.env;
