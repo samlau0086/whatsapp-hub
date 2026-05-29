@@ -468,7 +468,7 @@ function renderDeploymentGuide() {
       label: "Windows BAT",
       filename: `${clientId}-install.bat`,
       content: state.clientDeployment.windowsBat || state.clientDeployment.windowsPowerShell || "",
-      note: `Download ${clientId}-install.bat, then double-click it. If Windows asks for permission, allow it to install Node.js.`
+      note: `First run: double-click ${clientId}-install.bat. It will create start-agent.bat in the agent folder. Later runs: double-click start-agent.bat.`
     }
   };
   const activeBlock = blocks[state.deploymentTab] || blocks.env;
