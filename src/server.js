@@ -759,9 +759,7 @@ function buildWindowsAgentScript({ clientId, agentBaseUrl, env }) {
     "if errorlevel 1 goto :DownloadFailed",
     "",
     "echo Writing .env...",
-    "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$envText = @'",
-    env,
-    "'@; Set-Content -Encoding utf8 '.env' $envText\"",
+    `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${powershellEncodedWriteEnv(env)}`,
     "if errorlevel 1 goto :Failed",
     "",
     "echo Installing dependencies. This may take several minutes...",
@@ -837,6 +835,16 @@ function shellSingleQuote(value) {
 
 function windowsBatchValue(value) {
   return String(value).replace(/[%"]/g, "-");
+}
+
+function powershellEncodedWriteEnv(env) {
+  const script = [
+    "$envText = @'",
+    env,
+    "'@",
+    "Set-Content -Encoding utf8 '.env' $envText"
+  ].join("\n");
+  return Buffer.from(script, "utf16le").toString("base64");
 }
 
 async function createAndDispatchMessageTask(req, res) {
