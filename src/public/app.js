@@ -570,6 +570,10 @@ function closeClientModal() {
 
 function setClientFormDefaults() {
   if (!$("new-client-hub-url")) return;
+  $("client-create-form")?.reset();
+  $("new-client-id").disabled = false;
+  $("new-client-id").value = "";
+  $("new-client-name").value = "";
   $("new-client-hub-url").value = window.location.origin;
   $("new-client-auth-path").value = "";
   $("new-client-cache-path").value = "";
@@ -577,7 +581,6 @@ function setClientFormDefaults() {
   $("new-client-proxy-username").value = "";
   $("new-client-proxy-password").value = "";
   $("new-client-headless").checked = true;
-  $("new-client-id").disabled = false;
 }
 
 function fillClientForm(clientConfig = {}, deployment = null) {
