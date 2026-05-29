@@ -52,6 +52,7 @@ import {
   setClientStatus,
   touchApiToken,
   updateApiToken,
+  updateClientConfig,
   updateClientConfigAgentToken,
   updateUser
 } from "./db.js";
@@ -143,7 +144,27 @@ app.get("/admin/api/client-configs/:id/deployment", requireWebSession, requirePe
     });
   }
   res.json({
-    clientConfig: publicClientConfig(clientConfig),
+    clientConfig: editableClientConfig(clientConfig),
+    deployment: buildClientDeployment(clientConfig, clientConfig.agent_token, requestPublicBaseUrl(req))
+  });
+});
+
+app.patch("/admin/api/client-configs/:id", requireWebSession, requirePermission("clients:delete"), (req, res) => {
+  const payload = req.body || {};
+  const current = getClientConfig(req.params.id);
+  if (!current) return res.status(404).json({ error: "client config not found" });
+  const clientConfig = updateClientConfig(req.params.id, {
+    name: String(payload.name || current.name).trim(),
+    hubUrl: String(payload.hubUrl || requestPublicBaseUrl(req) || current.hub_url || config.publicBaseUrl).trim(),
+    authDataPath: String(payload.authDataPath || current.auth_data_path || `./.wwebjs_auth_${current.client_id}`).trim(),
+    cachePath: String(payload.cachePath || current.cache_path || `./.wwebjs_cache_${current.client_id}`).trim(),
+    proxyUrl: String(payload.proxyUrl || "").trim(),
+    proxyUsername: String(payload.proxyUsername || "").trim(),
+    proxyPassword: String(payload.proxyPassword || ""),
+    headless: payload.headless !== false
+  });
+  res.json({
+    clientConfig: editableClientConfig(clientConfig),
     deployment: buildClientDeployment(clientConfig, clientConfig.agent_token, requestPublicBaseUrl(req))
   });
 });
@@ -551,6 +572,13 @@ function publicClientConfig(clientConfig) {
     api_token_id: clientConfig.api_token_id,
     created_at: clientConfig.created_at,
     updated_at: clientConfig.updated_at
+  };
+}
+
+function editableClientConfig(clientConfig) {
+  return clientConfig && {
+    ...publicClientConfig(clientConfig),
+    proxy_password: clientConfig.proxy_password
   };
 }
 

@@ -341,6 +341,42 @@ export function updateClientConfigAgentToken(id, { apiTokenId, agentToken }) {
   return getClientConfig(id);
 }
 
+export function updateClientConfig(id, patch) {
+  const current = getClientConfig(id);
+  if (!current) return null;
+  const next = {
+    id,
+    name: patch.name ?? current.name,
+    hub_url: patch.hubUrl ?? current.hub_url,
+    auth_data_path: patch.authDataPath ?? current.auth_data_path,
+    cache_path: patch.cachePath ?? current.cache_path,
+    proxy_url: patch.proxyUrl ?? current.proxy_url,
+    proxy_username: patch.proxyUsername ?? current.proxy_username,
+    proxy_password: patch.proxyPassword ?? current.proxy_password,
+    headless: patch.headless === undefined ? (current.headless ? 1 : 0) : (patch.headless ? 1 : 0),
+    updated_at: now()
+  };
+  const transaction = db.transaction(() => {
+    db.prepare(`
+      UPDATE client_configs
+      SET name = @name,
+          hub_url = @hub_url,
+          auth_data_path = @auth_data_path,
+          cache_path = @cache_path,
+          proxy_url = @proxy_url,
+          proxy_username = @proxy_username,
+          proxy_password = @proxy_password,
+          headless = @headless,
+          updated_at = @updated_at
+      WHERE id = @id
+    `).run(next);
+    db.prepare("UPDATE clients SET name = ?, updated_at = ? WHERE id = ?")
+      .run(next.name, next.updated_at, current.client_id);
+  });
+  transaction();
+  return getClientConfig(id);
+}
+
 export function listClientConfigs() {
   return db.prepare("SELECT * FROM client_configs ORDER BY updated_at DESC").all().map(mapClientConfig);
 }

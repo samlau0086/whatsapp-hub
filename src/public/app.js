@@ -14,6 +14,7 @@ const state = {
   clientConfigs: [],
   clientDeployment: null,
   deploymentTab: "env",
+  editingClientConfigId: "",
   socket: null,
   clientFilter: "all",
   selectedClientId: "",
@@ -540,17 +541,21 @@ function downloadTextFile(filename, content) {
   URL.revokeObjectURL(url);
 }
 
-function openClientModal({ mode = "create", deployment = null } = {}) {
+function openClientModal({ mode = "create", deployment = null, clientConfig = null } = {}) {
   if (!$("client-modal")) return;
   state.clientDeployment = deployment;
   state.deploymentTab = "env";
-  $("client-modal-title").textContent = mode === "create" ? "New WhatsApp Client" : "Client Deployment";
-  $("client-create-form").hidden = mode !== "create";
+  state.editingClientConfigId = mode === "edit" ? clientConfig?.id || "" : "";
+  $("client-modal-title").textContent = mode === "create" ? "New WhatsApp Client" : "Edit Client Deployment";
+  $("client-create-form").hidden = false;
   $("client-modal").hidden = false;
   if (mode === "create") {
     state.clientDeployment = null;
+    state.editingClientConfigId = "";
     setClientFormDefaults();
     $("new-client-id").focus();
+  } else {
+    fillClientForm(clientConfig, deployment);
   }
   renderDeploymentGuide();
 }
@@ -559,6 +564,7 @@ function closeClientModal() {
   if (!$("client-modal")) return;
   $("client-modal").hidden = true;
   state.clientDeployment = null;
+  state.editingClientConfigId = "";
   renderDeploymentGuide();
 }
 
@@ -571,6 +577,21 @@ function setClientFormDefaults() {
   $("new-client-proxy-username").value = "";
   $("new-client-proxy-password").value = "";
   $("new-client-headless").checked = true;
+  $("new-client-id").disabled = false;
+}
+
+function fillClientForm(clientConfig = {}, deployment = null) {
+  const resolved = deployment?.config || {};
+  $("new-client-id").value = clientConfig.client_id || resolved.clientId || "";
+  $("new-client-id").disabled = true;
+  $("new-client-name").value = clientConfig.name || resolved.clientName || "";
+  $("new-client-hub-url").value = clientConfig.hub_url || resolved.hubUrl || window.location.origin;
+  $("new-client-auth-path").value = clientConfig.auth_data_path || resolved.authDataPath || "";
+  $("new-client-cache-path").value = clientConfig.cache_path || resolved.cachePath || "";
+  $("new-client-proxy-url").value = clientConfig.proxy_url || resolved.proxyUrl || "";
+  $("new-client-proxy-username").value = clientConfig.proxy_username || resolved.proxyUsername || "";
+  $("new-client-proxy-password").value = clientConfig.proxy_password || resolved.proxyPassword || "";
+  $("new-client-headless").checked = clientConfig.headless ?? resolved.headless ?? true;
 }
 
 async function load() {
@@ -712,19 +733,24 @@ async function createClientConfig(event) {
     proxyPassword: $("new-client-proxy-password").value,
     headless: $("new-client-headless").checked
   };
-  await api("/admin/api/client-configs", {
-    method: "POST",
+  const isEditing = Boolean(state.editingClientConfigId);
+  const path = isEditing ? `/admin/api/client-configs/${state.editingClientConfigId}` : "/admin/api/client-configs";
+  await api(path, {
+    method: isEditing ? "PATCH" : "POST",
     body: JSON.stringify(payload)
   })
     .then(async ({ clientConfig, deployment }) => {
-      $("client-create-form").reset();
-      $("new-client-headless").checked = true;
+      if (!isEditing) {
+        $("client-create-form").reset();
+        $("new-client-headless").checked = true;
+      }
       state.clientDeployment = deployment;
       state.clientConfigs = [clientConfig, ...state.clientConfigs.filter((item) => item.id !== clientConfig.id)];
       state.clients = (await api("/admin/api/clients")).clients;
-      showToast("Client config saved");
-      $("client-create-form").hidden = true;
-      $("client-modal-title").textContent = "Client Deployment";
+      fillClientForm(clientConfig, deployment);
+      state.editingClientConfigId = clientConfig.id;
+      showToast(isEditing ? "Client config updated" : "Client config saved");
+      $("client-modal-title").textContent = "Edit Client Deployment";
       render();
     })
     .catch((error) => showToast(error.message));
@@ -734,8 +760,8 @@ async function showClientDeployment(clientId) {
   const clientConfig = clientConfigFor(clientId);
   if (!clientConfig) return;
   await api(`/admin/api/client-configs/${clientConfig.id}/deployment`)
-    .then(({ deployment }) => {
-      openClientModal({ mode: "deployment", deployment });
+    .then(({ clientConfig: editableConfig, deployment }) => {
+      openClientModal({ mode: "edit", deployment, clientConfig: editableConfig });
     })
     .catch((error) => showToast(error.message));
 }
