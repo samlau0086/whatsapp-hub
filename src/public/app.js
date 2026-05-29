@@ -204,6 +204,10 @@ function selectedClient() {
   return state.clients.find((client) => client.id === state.selectedClientId);
 }
 
+function clientConfigFor(clientId) {
+  return state.clientConfigs.find((config) => config.client_id === clientId);
+}
+
 function filteredClients() {
   if (state.clientFilter === "online") return state.clients.filter((client) => client.status === "online");
   if (state.clientFilter === "offline") return state.clients.filter((client) => client.status !== "online");
@@ -245,8 +249,7 @@ function render() {
   $("chat-summary").textContent = activeClient ? activeClient.id : t("selectClient");
   $("active-chat-title").textContent = state.selectedChatId || t("noChatSelected");
   $("active-chat-subtitle").textContent = activeClient ? activeClient.name || activeClient.id : t("selectChat");
-  $("client-create-panel").hidden = !can("clients:delete");
-  $("new-client-hub-url").placeholder = window.location.origin;
+  $("toggle-client-create").hidden = !can("clients:delete");
   renderDeploymentGuide();
 
   $("clients").innerHTML = visibleClients.length ? visibleClients.map((client) => `
@@ -264,6 +267,7 @@ function render() {
       </div>
       <div class="client-actions">
         ${badge(client.status)}
+        ${clientConfigFor(client.id) ? `<button class="icon-button" type="button" title="Deployment guide" data-client-deployment="${escapeHtml(client.id)}">&lt;/&gt;</button>` : ""}
         ${can("clients:delete") ? `<button class="ghost-button danger-button" type="button" data-remove-client="${escapeHtml(client.id)}">${escapeHtml(t("removeClient"))}</button>` : ""}
       </div>
     </article>
@@ -458,6 +462,35 @@ function renderDeploymentGuide() {
   `;
 }
 
+function openClientModal({ mode = "create", deployment = null } = {}) {
+  state.clientDeployment = deployment;
+  $("client-modal-title").textContent = mode === "create" ? "New WhatsApp Client" : "Client Deployment";
+  $("client-create-form").hidden = mode !== "create";
+  $("client-modal").hidden = false;
+  if (mode === "create") {
+    state.clientDeployment = null;
+    setClientFormDefaults();
+    $("new-client-id").focus();
+  }
+  renderDeploymentGuide();
+}
+
+function closeClientModal() {
+  $("client-modal").hidden = true;
+  state.clientDeployment = null;
+  renderDeploymentGuide();
+}
+
+function setClientFormDefaults() {
+  $("new-client-hub-url").value = window.location.origin;
+  $("new-client-auth-path").value = "";
+  $("new-client-cache-path").value = "";
+  $("new-client-proxy-url").value = "";
+  $("new-client-proxy-username").value = "";
+  $("new-client-proxy-password").value = "";
+  $("new-client-headless").checked = true;
+}
+
 async function load() {
   setConnectionLabel(t("loading"));
   const me = await api("/admin/api/me").catch((error) => {
@@ -608,7 +641,19 @@ async function createClientConfig(event) {
       state.clientConfigs = [clientConfig, ...state.clientConfigs.filter((item) => item.id !== clientConfig.id)];
       state.clients = (await api("/admin/api/clients")).clients;
       showToast("Client config saved");
+      $("client-create-form").hidden = true;
+      $("client-modal-title").textContent = "Client Deployment";
       render();
+    })
+    .catch((error) => showToast(error.message));
+}
+
+async function showClientDeployment(clientId) {
+  const clientConfig = clientConfigFor(clientId);
+  if (!clientConfig) return;
+  await api(`/admin/api/client-configs/${clientConfig.id}/deployment`)
+    .then(({ deployment }) => {
+      openClientModal({ mode: "deployment", deployment });
     })
     .catch((error) => showToast(error.message));
 }
@@ -618,7 +663,16 @@ function bindEvents() {
   $("user-form").addEventListener("submit", createUser);
   $("token-create-form").addEventListener("submit", createApiToken);
   $("toggle-client-create").addEventListener("click", () => {
-    $("client-create-form").hidden = !$("client-create-form").hidden;
+    openClientModal({ mode: "create" });
+  });
+  document.querySelectorAll("[data-close-client-modal]").forEach((node) => {
+    node.addEventListener("click", closeClientModal);
+  });
+  $("new-client-id").addEventListener("input", () => {
+    const clientId = $("new-client-id").value.trim();
+    if (!$("new-client-name").value.trim()) $("new-client-name").placeholder = clientId ? clientId : "Office PC 01";
+    $("new-client-auth-path").placeholder = clientId ? `./.wwebjs_auth_${clientId}` : "./.wwebjs_auth_office-pc-01";
+    $("new-client-cache-path").placeholder = clientId ? `./.wwebjs_cache_${clientId}` : "./.wwebjs_cache_office-pc-01";
   });
   $("client-deployment").addEventListener("click", async (event) => {
     const copy = event.target.closest("[data-copy-deployment]");
@@ -741,6 +795,12 @@ function bindEvents() {
   });
 
   $("clients").addEventListener("click", (event) => {
+    const deploymentButton = event.target.closest("[data-client-deployment]");
+    if (deploymentButton) {
+      event.stopPropagation();
+      showClientDeployment(deploymentButton.dataset.clientDeployment);
+      return;
+    }
     const removeButton = event.target.closest("[data-remove-client]");
     if (removeButton) {
       event.stopPropagation();

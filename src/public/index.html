@@ -62,7 +62,10 @@
               <h2 data-i18n="clients">Clients</h2>
               <p id="client-summary">0 online</p>
             </div>
-            <button id="refresh" class="ghost-button" type="button" data-i18n="refresh">Refresh</button>
+            <div class="section-actions">
+              <button id="toggle-client-create" class="ghost-button" type="button">New</button>
+              <button id="refresh" class="ghost-button" type="button" data-i18n="refresh">Refresh</button>
+            </div>
           </div>
 
           <div class="filter-row">
@@ -70,26 +73,6 @@
             <button id="filter-online" class="filter-button" type="button" data-i18n="online">Online</button>
             <button id="filter-offline" class="filter-button" type="button" data-i18n="offline">Offline</button>
           </div>
-
-          <section id="client-create-panel" class="client-create-panel">
-            <button id="toggle-client-create" class="ghost-button" type="button">New client</button>
-            <form id="client-create-form" class="client-create-form" hidden>
-              <input id="new-client-id" placeholder="client id, e.g. office-pc-01" />
-              <input id="new-client-name" placeholder="client name" />
-              <input id="new-client-hub-url" placeholder="hub url" />
-              <input id="new-client-auth-path" placeholder="auth data path" />
-              <input id="new-client-cache-path" placeholder="cache path" />
-              <input id="new-client-proxy-url" placeholder="proxy url, optional" />
-              <input id="new-client-proxy-username" placeholder="proxy username, optional" />
-              <input id="new-client-proxy-password" placeholder="proxy password, optional" type="password" />
-              <label class="checkbox-line">
-                <input id="new-client-headless" type="checkbox" checked />
-                <span>Headless browser</span>
-              </label>
-              <button type="submit">Save and generate deploy guide</button>
-            </form>
-            <div id="client-deployment" class="deployment-guide" hidden></div>
-          </section>
 
           <div id="clients" class="client-list"></div>
         </aside>
@@ -230,6 +213,62 @@
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <div id="client-modal" class="modal-shell" hidden>
+      <div class="modal-backdrop" data-close-client-modal></div>
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="client-modal-title">
+        <header class="modal-header">
+          <div>
+            <h2 id="client-modal-title">New WhatsApp Client</h2>
+            <p>Configure a client and generate its deployment script.</p>
+          </div>
+          <button class="icon-button" type="button" data-close-client-modal aria-label="Close">X</button>
+        </header>
+        <form id="client-create-form" class="client-create-form">
+          <label>
+            <span>Client ID</span>
+            <input id="new-client-id" placeholder="office-pc-01" />
+          </label>
+          <label>
+            <span>Client name</span>
+            <input id="new-client-name" placeholder="Office PC 01" />
+          </label>
+          <label class="wide-field">
+            <span>Hub URL</span>
+            <input id="new-client-hub-url" placeholder="https://ws.example.com" />
+          </label>
+          <label>
+            <span>Auth data path</span>
+            <input id="new-client-auth-path" placeholder="./.wwebjs_auth_office-pc-01" />
+          </label>
+          <label>
+            <span>Cache path</span>
+            <input id="new-client-cache-path" placeholder="./.wwebjs_cache_office-pc-01" />
+          </label>
+          <label class="wide-field">
+            <span>Proxy URL</span>
+            <input id="new-client-proxy-url" placeholder="socks5://127.0.0.1:1080" />
+          </label>
+          <label>
+            <span>Proxy username</span>
+            <input id="new-client-proxy-username" placeholder="optional" />
+          </label>
+          <label>
+            <span>Proxy password</span>
+            <input id="new-client-proxy-password" placeholder="optional" type="password" />
+          </label>
+          <label class="checkbox-line wide-field">
+            <input id="new-client-headless" type="checkbox" checked />
+            <span>Run Chromium in headless mode</span>
+          </label>
+          <footer class="modal-actions">
+            <button class="ghost-button" type="button" data-close-client-modal>Cancel</button>
+            <button type="submit">Save and generate</button>
+          </footer>
+        </form>
+        <div id="client-deployment" class="deployment-guide" hidden></div>
+      </section>
+    </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="/app.js"></script>

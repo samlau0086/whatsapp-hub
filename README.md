@@ -830,7 +830,7 @@ Agent:
 
 ## Web 后台新增 Client 部署
 
-超级管理员或具备 client 管理权限的用户可以在 Web 中控的 Clients 面板点击 `New client`：
+超级管理员或具备 client 管理权限的用户可以在 Web 中控的 Clients 面板点击 `New`：
 
 1. 填写 `client id`、`client name`、认证目录、缓存目录、代理等参数。
 2. 保存后 Hub 会预注册一个 offline client，并生成该 client 专用的 agent token。
@@ -840,6 +840,7 @@ Agent:
    - 生成的 `.env`
 
 这样内网电脑无需下载整个 hub 项目代码。生成的 token 只在创建后显示在部署说明中；若丢失，建议重新创建 client 配置或生成新的 agent token。
+已通过后台创建的 client 会在 client 卡片上显示部署脚本按钮，可再次打开该 client 的部署说明。
 
 部署说明中的 token 默认只包含：
 

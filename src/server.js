@@ -32,6 +32,7 @@ import {
   deleteUser,
   deleteWebhook,
   getClient,
+  getClientConfig,
   getClientConfigByClientId,
   getTask,
   getUser,
@@ -51,6 +52,7 @@ import {
   setClientStatus,
   touchApiToken,
   updateApiToken,
+  updateClientConfigAgentToken,
   updateUser
 } from "./db.js";
 import { chooseClient, createHub, forgetClientSocket, reconcileClientPresence } from "./hub.js";
@@ -117,6 +119,29 @@ app.get("/admin/api/client-configs", requireWebSession, requirePermission("clien
   res.json({ clientConfigs: listClientConfigs().map(publicClientConfig) });
 });
 
+app.get("/admin/api/client-configs/:id/deployment", requireWebSession, requirePermission("clients:read"), (req, res) => {
+  let clientConfig = getClientConfig(req.params.id);
+  if (!clientConfig) return res.status(404).json({ error: "client config not found" });
+  if (!clientConfig.agent_token) {
+    const rawToken = generateApiToken();
+    const apiToken = createApiToken({
+      name: `agent:${clientConfig.client_id}`,
+      tokenHash: hashApiToken(rawToken),
+      permissions: ["agent:connect", "uploads:create"],
+      enabled: true,
+      createdBy: req.user.id
+    });
+    clientConfig = updateClientConfigAgentToken(clientConfig.id, {
+      apiTokenId: apiToken.id,
+      agentToken: rawToken
+    });
+  }
+  res.json({
+    clientConfig: publicClientConfig(clientConfig),
+    deployment: buildClientDeployment(clientConfig, clientConfig.agent_token)
+  });
+});
+
 app.post("/admin/api/client-configs", requireWebSession, requirePermission("clients:delete"), (req, res) => {
   const payload = req.body || {};
   const clientId = String(payload.clientId || "").trim();
@@ -146,6 +171,7 @@ app.post("/admin/api/client-configs", requireWebSession, requirePermission("clie
     proxyPassword: String(payload.proxyPassword || ""),
     headless: payload.headless !== false,
     apiTokenId: apiToken.id,
+    agentToken: rawToken,
     createdBy: req.user.id
   });
   res.status(201).json({

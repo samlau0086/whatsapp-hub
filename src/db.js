@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS client_configs (
   proxy_password TEXT,
   headless INTEGER NOT NULL DEFAULT 1,
   api_token_id TEXT,
+  agent_token TEXT,
   created_by TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -140,6 +141,8 @@ CREATE TABLE IF NOT EXISTS client_configs (
 
 CREATE INDEX IF NOT EXISTS idx_client_configs_client_id ON client_configs(client_id);
 `);
+
+ensureColumn("client_configs", "agent_token", "TEXT");
 
 const now = () => new Date().toISOString();
 const json = (value) => JSON.stringify(value === undefined ? {} : value);
@@ -166,6 +169,11 @@ const mapClientConfig = (row) => row && ({ ...row, headless: Boolean(row.headles
 
 seedAdminUser();
 ensureSuperAdminUser();
+
+function ensureColumn(table, column, definition) {
+  const exists = db.prepare(`PRAGMA table_info(${table})`).all().some((item) => item.name === column);
+  if (!exists) db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+}
 
 export function upsertClient({ id, name, phone = null, metadata = {}, status = "online" }) {
   const timestamp = now();
@@ -255,6 +263,7 @@ export function createClientConfig({
   proxyPassword = "",
   headless = true,
   apiTokenId = null,
+  agentToken = "",
   createdBy = null
 }) {
   const timestamp = now();
@@ -264,12 +273,12 @@ export function createClientConfig({
       INSERT INTO client_configs (
         id, client_id, name, hub_url, auth_data_path, cache_path,
         proxy_url, proxy_username, proxy_password, headless,
-        api_token_id, created_by, created_at, updated_at
+        api_token_id, agent_token, created_by, created_at, updated_at
       )
       VALUES (
         @id, @client_id, @name, @hub_url, @auth_data_path, @cache_path,
         @proxy_url, @proxy_username, @proxy_password, @headless,
-        @api_token_id, @created_by, @created_at, @updated_at
+        @api_token_id, @agent_token, @created_by, @created_at, @updated_at
       )
     `).run({
       id,
@@ -283,6 +292,7 @@ export function createClientConfig({
       proxy_password: proxyPassword,
       headless: headless ? 1 : 0,
       api_token_id: apiTokenId,
+      agent_token: agentToken,
       created_by: createdBy,
       created_at: timestamp,
       updated_at: timestamp
@@ -313,6 +323,22 @@ export function getClientConfig(id) {
 
 export function getClientConfigByClientId(clientId) {
   return mapClientConfig(db.prepare("SELECT * FROM client_configs WHERE client_id = ?").get(clientId));
+}
+
+export function updateClientConfigAgentToken(id, { apiTokenId, agentToken }) {
+  db.prepare(`
+    UPDATE client_configs
+    SET api_token_id = @api_token_id,
+        agent_token = @agent_token,
+        updated_at = @updated_at
+    WHERE id = @id
+  `).run({
+    id,
+    api_token_id: apiTokenId,
+    agent_token: agentToken,
+    updated_at: now()
+  });
+  return getClientConfig(id);
 }
 
 export function listClientConfigs() {
