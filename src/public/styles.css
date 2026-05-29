@@ -488,6 +488,33 @@ p {
   margin: 0;
 }
 
+.run-notes {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  gap: 6px;
+  padding: 10px;
+}
+
+.run-notes code {
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+.deployment-code {
+  display: grid;
+  gap: 6px;
+}
+
+.deployment-code-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
 .deployment-guide pre {
   background: var(--surface-soft);
   border: 1px solid var(--line);

@@ -448,20 +448,51 @@ function renderDeploymentGuide() {
     container.innerHTML = "";
     return;
   }
+  const clientId = deploymentClientId(state.clientDeployment);
   container.hidden = false;
   container.innerHTML = `
     <div class="deployment-head">
       <strong>Client deployment</strong>
       <button class="ghost-button" type="button" data-copy-deployment>Copy Linux guide</button>
     </div>
-    <p>Run this on the internal-network computer. It downloads only the agent script and package file.</p>
-    <label>.env</label>
-    <pre>${escapeHtml(state.clientDeployment.env)}</pre>
-    <label>Linux / macOS</label>
-    <pre>${escapeHtml(state.clientDeployment.linux)}</pre>
-    <label>Windows PowerShell</label>
-    <pre>${escapeHtml(state.clientDeployment.windowsPowerShell)}</pre>
+    <p>Run this on the internal-network computer. Download the .env file and the script for your OS, then execute the script in the same folder.</p>
+    <div class="run-notes">
+      <span>Linux/macOS: <code>chmod +x ${escapeHtml(clientId)}-install.sh && ./${escapeHtml(clientId)}-install.sh</code></span>
+      <span>Windows PowerShell: right-click <code>${escapeHtml(clientId)}-install.ps1</code>, run with PowerShell, or run <code>powershell -ExecutionPolicy Bypass -File .\\${escapeHtml(clientId)}-install.ps1</code>.</span>
+    </div>
+    ${deploymentCodeBlock(".env", "env", `${clientId}.env`, state.clientDeployment.env)}
+    ${deploymentCodeBlock("Linux / macOS", "linux", `${clientId}-install.sh`, state.clientDeployment.linux)}
+    ${deploymentCodeBlock("Windows PowerShell", "windowsPowerShell", `${clientId}-install.ps1`, state.clientDeployment.windowsPowerShell)}
   `;
+}
+
+function deploymentCodeBlock(label, key, filename, content) {
+  return `
+    <section class="deployment-code">
+      <div class="deployment-code-head">
+        <label>${escapeHtml(label)}</label>
+        <button class="icon-button" type="button" title="Download ${escapeHtml(label)}" data-download-deployment="${escapeHtml(key)}" data-download-filename="${escapeHtml(filename)}">DL</button>
+      </div>
+      <pre>${escapeHtml(content || "")}</pre>
+    </section>
+  `;
+}
+
+function deploymentClientId(deployment) {
+  const match = String(deployment?.env || "").match(/^CLIENT_ID="?([^"\n]+)"?/m);
+  return (match?.[1] || "whatsapp-client").replace(/[^a-zA-Z0-9_.-]/g, "-");
+}
+
+function downloadTextFile(filename, content) {
+  const blob = new Blob([content || ""], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function openClientModal({ mode = "create", deployment = null } = {}) {
@@ -680,6 +711,13 @@ function bindEvents() {
     $("new-client-cache-path").placeholder = clientId ? `./.wwebjs_cache_${clientId}` : "./.wwebjs_cache_office-pc-01";
   });
   $("client-deployment")?.addEventListener("click", async (event) => {
+    const download = event.target.closest("[data-download-deployment]");
+    if (download && state.clientDeployment) {
+      const key = download.dataset.downloadDeployment;
+      downloadTextFile(download.dataset.downloadFilename, state.clientDeployment[key]);
+      showToast("File downloaded");
+      return;
+    }
     const copy = event.target.closest("[data-copy-deployment]");
     if (!copy || !state.clientDeployment) return;
     await navigator.clipboard?.writeText(state.clientDeployment.linux).catch(() => {});
