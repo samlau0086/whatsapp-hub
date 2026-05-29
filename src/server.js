@@ -593,6 +593,7 @@ function agentPackageJson() {
     },
     dependencies: {
       dotenv: "^16.4.7",
+      qrcode: "^1.5.4",
       "qrcode-terminal": "^0.12.0",
       "socket.io-client": "^4.8.1",
       "whatsapp-web.js": "^1.34.7"
@@ -625,6 +626,7 @@ function buildClientDeployment(clientConfig, token, fallbackHubUrl = config.publ
     ["CLIENT_PROXY_PASSWORD", resolved.proxyPassword],
     ["PUPPETEER_CACHE_DIR", "./.puppeteer-cache"],
     ["PUPPETEER_EXECUTABLE_PATH", ""],
+    ["QR_OUTPUT_DIR", "."],
     ["PUPPETEER_HEADLESS", resolved.headless ? "true" : "false"]
   ].map(([key, value]) => `${key}=${quoteEnv(value)}`).join("\n");
 

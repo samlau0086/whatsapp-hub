@@ -2,7 +2,8 @@ import dotenv from "dotenv";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import qrcode from "qrcode-terminal";
+import QRCode from "qrcode";
+import qrcodeTerminal from "qrcode-terminal";
 import { io } from "socket.io-client";
 import pkg from "whatsapp-web.js";
 
@@ -21,6 +22,7 @@ const config = {
   proxyUsername: process.env.CLIENT_PROXY_USERNAME || "",
   proxyPassword: process.env.CLIENT_PROXY_PASSWORD || "",
   executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || "",
+  qrOutputDir: path.resolve(process.env.QR_OUTPUT_DIR || "."),
   headless: process.env.PUPPETEER_HEADLESS !== "false"
 };
 
@@ -62,6 +64,7 @@ const whatsapp = new Client({
 console.log(`auth data path: ${config.authDataPath}`);
 console.log(`web cache path: ${config.cachePath}`);
 console.log(`proxy: ${config.proxyUrl || "disabled"}`);
+console.log(`qr image output: ${config.qrOutputDir}`);
 
 function emitHello(status = "online") {
   socket.emit("client:hello", {
@@ -129,8 +132,19 @@ setInterval(() => {
   }
 }, 15_000).unref();
 
-whatsapp.on("qr", (qr) => {
-  qrcode.generate(qr, { small: true });
+whatsapp.on("qr", async (qr) => {
+  qrcodeTerminal.generate(qr, { small: true });
+  try {
+    await fs.mkdir(config.qrOutputDir, { recursive: true });
+    const clientQrPath = path.join(config.qrOutputDir, `whatsapp-qr-${safeFileName(config.clientId)}.png`);
+    const latestQrPath = path.join(config.qrOutputDir, "whatsapp-qr-latest.png");
+    await QRCode.toFile(clientQrPath, qr, { width: 420, margin: 2 });
+    await QRCode.toFile(latestQrPath, qr, { width: 420, margin: 2 });
+    console.log(`QR image saved: ${clientQrPath}`);
+    console.log(`Latest QR image: ${latestQrPath}`);
+  } catch (error) {
+    console.error(`failed to save QR image: ${error.message}`);
+  }
 });
 
 whatsapp.on("ready", () => {
@@ -168,3 +182,7 @@ whatsapp.on("message", async (message) => {
 });
 
 whatsapp.initialize();
+
+function safeFileName(value) {
+  return String(value || "client").replace(/[^a-zA-Z0-9_.-]/g, "-");
+}
