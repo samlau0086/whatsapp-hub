@@ -144,7 +144,7 @@ app.get("/admin/api/client-configs/:id/deployment", requireWebSession, requirePe
   }
   res.json({
     clientConfig: publicClientConfig(clientConfig),
-    deployment: buildClientDeployment(clientConfig, clientConfig.agent_token)
+    deployment: buildClientDeployment(clientConfig, clientConfig.agent_token, requestPublicBaseUrl(req))
   });
 });
 
@@ -169,7 +169,7 @@ app.post("/admin/api/client-configs", requireWebSession, requirePermission("clie
   const clientConfig = createClientConfig({
     clientId,
     name,
-    hubUrl: String(payload.hubUrl || config.publicBaseUrl).trim(),
+    hubUrl: String(payload.hubUrl || requestPublicBaseUrl(req) || config.publicBaseUrl).trim(),
     authDataPath: String(payload.authDataPath || `./.wwebjs_auth_${clientId}`).trim(),
     cachePath: String(payload.cachePath || `./.wwebjs_cache_${clientId}`).trim(),
     proxyUrl: String(payload.proxyUrl || "").trim(),
@@ -182,7 +182,7 @@ app.post("/admin/api/client-configs", requireWebSession, requirePermission("clie
   });
   res.status(201).json({
     clientConfig: publicClientConfig(clientConfig),
-    deployment: buildClientDeployment(clientConfig, rawToken)
+    deployment: buildClientDeployment(clientConfig, rawToken, requestPublicBaseUrl(req))
   });
 });
 
@@ -572,28 +572,41 @@ function agentPackageJson() {
   };
 }
 
-function buildClientDeployment(clientConfig, token) {
+function buildClientDeployment(clientConfig, token, fallbackHubUrl = config.publicBaseUrl) {
+  const storedClient = getClient(clientConfig.client_id);
+  const resolved = {
+    hubUrl: clientConfig.hub_url || fallbackHubUrl || config.publicBaseUrl,
+    clientId: clientConfig.client_id || storedClient?.id || "client-main",
+    clientName: clientConfig.name || storedClient?.name || clientConfig.client_id || "WhatsApp Client",
+    authDataPath: clientConfig.auth_data_path || `./.wwebjs_auth_${clientConfig.client_id || "client-main"}`,
+    cachePath: clientConfig.cache_path || `./.wwebjs_cache_${clientConfig.client_id || "client-main"}`,
+    proxyUrl: clientConfig.proxy_url || "",
+    proxyUsername: clientConfig.proxy_username || "",
+    proxyPassword: clientConfig.proxy_password || "",
+    headless: clientConfig.headless !== false
+  };
   const env = [
-    ["HUB_URL", clientConfig.hub_url],
-    ["CLIENT_ID", clientConfig.client_id],
-    ["CLIENT_NAME", clientConfig.name],
+    ["HUB_URL", resolved.hubUrl],
+    ["CLIENT_ID", resolved.clientId],
+    ["CLIENT_NAME", resolved.clientName],
     ["CLIENT_TOKEN", token],
-    ["WWEBJS_AUTH_DATA_PATH", clientConfig.auth_data_path],
-    ["WWEBJS_CACHE_PATH", clientConfig.cache_path],
-    ["CLIENT_PROXY_URL", clientConfig.proxy_url || ""],
-    ["CLIENT_PROXY_USERNAME", clientConfig.proxy_username || ""],
-    ["CLIENT_PROXY_PASSWORD", clientConfig.proxy_password || ""],
-    ["PUPPETEER_HEADLESS", clientConfig.headless ? "true" : "false"]
+    ["WWEBJS_AUTH_DATA_PATH", resolved.authDataPath],
+    ["WWEBJS_CACHE_PATH", resolved.cachePath],
+    ["CLIENT_PROXY_URL", resolved.proxyUrl],
+    ["CLIENT_PROXY_USERNAME", resolved.proxyUsername],
+    ["CLIENT_PROXY_PASSWORD", resolved.proxyPassword],
+    ["PUPPETEER_HEADLESS", resolved.headless ? "true" : "false"]
   ].map(([key, value]) => `${key}=${quoteEnv(value)}`).join("\n");
 
-  const agentBaseUrl = new URL("/agent/", clientConfig.hub_url).toString();
+  const agentBaseUrl = new URL("/agent/", resolved.hubUrl).toString();
   return {
+    config: resolved,
     env,
     agentUrl: new URL("wwebjs-client.js", agentBaseUrl).toString(),
     packageUrl: new URL("package.json", agentBaseUrl).toString(),
     linux: [
-      `mkdir -p whatsapp-agent-${clientConfig.client_id}`,
-      `cd whatsapp-agent-${clientConfig.client_id}`,
+      `mkdir -p whatsapp-agent-${resolved.clientId}`,
+      `cd whatsapp-agent-${resolved.clientId}`,
       `curl -fsSL ${new URL("package.json", agentBaseUrl).toString()} -o package.json`,
       `curl -fsSL ${new URL("wwebjs-client.js", agentBaseUrl).toString()} -o wwebjs-client.js`,
       "cat > .env <<'EOF'",
@@ -603,8 +616,8 @@ function buildClientDeployment(clientConfig, token) {
       "npm start"
     ].join("\n"),
     windowsPowerShell: [
-      `New-Item -ItemType Directory -Force whatsapp-agent-${clientConfig.client_id} | Out-Null`,
-      `Set-Location whatsapp-agent-${clientConfig.client_id}`,
+      `New-Item -ItemType Directory -Force whatsapp-agent-${resolved.clientId} | Out-Null`,
+      `Set-Location whatsapp-agent-${resolved.clientId}`,
       `Invoke-WebRequest "${new URL("package.json", agentBaseUrl).toString()}" -OutFile package.json`,
       `Invoke-WebRequest "${new URL("wwebjs-client.js", agentBaseUrl).toString()}" -OutFile wwebjs-client.js`,
       "@'",
@@ -614,6 +627,12 @@ function buildClientDeployment(clientConfig, token) {
       "npm start"
     ].join("\n")
   };
+}
+
+function requestPublicBaseUrl(req) {
+  const protocol = req.get("x-forwarded-proto") || req.protocol || "http";
+  const host = req.get("x-forwarded-host") || req.get("host");
+  return host ? `${protocol}://${host}` : config.publicBaseUrl;
 }
 
 function quoteEnv(value) {

@@ -478,6 +478,7 @@ function renderDeploymentGuide() {
       <button class="ghost-button" type="button" data-copy-deployment>Copy Linux guide</button>
     </div>
     <p>Download the .env file and the script for your OS, put them in the same folder, then run the script on the internal-network computer.</p>
+    ${deploymentConfigSummary(state.clientDeployment.config)}
     <div class="deployment-tabs" role="tablist">
       ${Object.entries(blocks).map(([key, block]) => `
         <button class="deployment-tab ${state.deploymentTab === key ? "active" : ""}" type="button" data-deployment-tab="${escapeHtml(key)}">${escapeHtml(block.label)}</button>
@@ -485,6 +486,28 @@ function renderDeploymentGuide() {
     </div>
     <div class="run-notes"><span>${escapeHtml(activeBlock.note)}</span></div>
     ${deploymentCodeBlock(activeBlock.label, state.deploymentTab, activeBlock.filename, activeBlock.content)}
+  `;
+}
+
+function deploymentConfigSummary(config = {}) {
+  if (!config) return "";
+  const rows = [
+    ["Client ID", config.clientId],
+    ["Client name", config.clientName],
+    ["Hub URL", config.hubUrl],
+    ["Auth path", config.authDataPath],
+    ["Cache path", config.cachePath],
+    ["Proxy", config.proxyUrl || "disabled"]
+  ];
+  return `
+    <div class="deployment-config">
+      ${rows.map(([label, value]) => `
+        <div>
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value || "-")}</strong>
+        </div>
+      `).join("")}
+    </div>
   `;
 }
 

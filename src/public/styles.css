@@ -519,6 +519,39 @@ p {
   padding: 4px;
 }
 
+.deployment-config {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+}
+
+.deployment-config div {
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.deployment-config div:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.deployment-config span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.deployment-config strong {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .deployment-tab {
   background: transparent;
   border: 0;
@@ -1098,9 +1131,22 @@ p {
   .token-create-form button,
   .token-create-permissions,
   .wide-field,
-  .modal-actions {
+  .modal-actions,
+  .deployment-config {
     grid-column: 1;
     grid-row: auto;
+  }
+
+  .deployment-config {
+    grid-template-columns: 1fr;
+  }
+
+  .deployment-config div:nth-last-child(-n + 2) {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .deployment-config div:last-child {
+    border-bottom: 0;
   }
 
   .modal-card {
