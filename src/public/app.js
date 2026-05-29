@@ -249,7 +249,8 @@ function render() {
   $("chat-summary").textContent = activeClient ? activeClient.id : t("selectClient");
   $("active-chat-title").textContent = state.selectedChatId || t("noChatSelected");
   $("active-chat-subtitle").textContent = activeClient ? activeClient.name || activeClient.id : t("selectChat");
-  $("toggle-client-create").hidden = !can("clients:delete");
+  const createClientButton = $("toggle-client-create");
+  if (createClientButton) createClientButton.hidden = !can("clients:delete");
   renderDeploymentGuide();
 
   $("clients").innerHTML = visibleClients.length ? visibleClients.map((client) => `
@@ -441,6 +442,7 @@ function showToast(message) {
 
 function renderDeploymentGuide() {
   const container = $("client-deployment");
+  if (!container) return;
   if (!state.clientDeployment) {
     container.hidden = true;
     container.innerHTML = "";
@@ -463,6 +465,7 @@ function renderDeploymentGuide() {
 }
 
 function openClientModal({ mode = "create", deployment = null } = {}) {
+  if (!$("client-modal")) return;
   state.clientDeployment = deployment;
   $("client-modal-title").textContent = mode === "create" ? "New WhatsApp Client" : "Client Deployment";
   $("client-create-form").hidden = mode !== "create";
@@ -476,12 +479,14 @@ function openClientModal({ mode = "create", deployment = null } = {}) {
 }
 
 function closeClientModal() {
+  if (!$("client-modal")) return;
   $("client-modal").hidden = true;
   state.clientDeployment = null;
   renderDeploymentGuide();
 }
 
 function setClientFormDefaults() {
+  if (!$("new-client-hub-url")) return;
   $("new-client-hub-url").value = window.location.origin;
   $("new-client-auth-path").value = "";
   $("new-client-cache-path").value = "";
@@ -662,25 +667,25 @@ function bindEvents() {
   $("logout").addEventListener("click", logout);
   $("user-form").addEventListener("submit", createUser);
   $("token-create-form").addEventListener("submit", createApiToken);
-  $("toggle-client-create").addEventListener("click", () => {
-    openClientModal({ mode: "create" });
+  $("toggle-client-create")?.addEventListener("click", () => {
+    if ($("client-modal")) openClientModal({ mode: "create" });
   });
   document.querySelectorAll("[data-close-client-modal]").forEach((node) => {
     node.addEventListener("click", closeClientModal);
   });
-  $("new-client-id").addEventListener("input", () => {
+  $("new-client-id")?.addEventListener("input", () => {
     const clientId = $("new-client-id").value.trim();
     if (!$("new-client-name").value.trim()) $("new-client-name").placeholder = clientId ? clientId : "Office PC 01";
     $("new-client-auth-path").placeholder = clientId ? `./.wwebjs_auth_${clientId}` : "./.wwebjs_auth_office-pc-01";
     $("new-client-cache-path").placeholder = clientId ? `./.wwebjs_cache_${clientId}` : "./.wwebjs_cache_office-pc-01";
   });
-  $("client-deployment").addEventListener("click", async (event) => {
+  $("client-deployment")?.addEventListener("click", async (event) => {
     const copy = event.target.closest("[data-copy-deployment]");
     if (!copy || !state.clientDeployment) return;
     await navigator.clipboard?.writeText(state.clientDeployment.linux).catch(() => {});
     showToast("Deployment guide copied");
   });
-  $("client-create-form").addEventListener("submit", createClientConfig);
+  $("client-create-form")?.addEventListener("submit", createClientConfig);
   $("token-secret").addEventListener("click", async (event) => {
     const copy = event.target.closest("[data-copy-generated-token]");
     if (!copy) return;
