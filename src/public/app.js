@@ -545,16 +545,17 @@ function openClientModal({ mode = "create", deployment = null, clientConfig = nu
   if (!$("client-modal")) return;
   state.clientDeployment = deployment;
   state.deploymentTab = "env";
-  state.editingClientConfigId = mode === "edit" ? clientConfig?.id || "" : "";
-  $("client-modal-title").textContent = mode === "create" ? "New WhatsApp Client" : "Edit Client Deployment";
-  $("client-create-form").hidden = false;
+  state.editingClientConfigId = mode === "view" || mode === "edit" ? clientConfig?.id || "" : "";
+  $("client-modal-title").textContent = mode === "create" ? "New WhatsApp Client" : "Client Deployment";
+  $("client-create-form").hidden = mode === "view";
+  if ($("client-edit-actions")) $("client-edit-actions").hidden = mode !== "view";
   $("client-modal").hidden = false;
   if (mode === "create") {
     state.clientDeployment = null;
     state.editingClientConfigId = "";
     setClientFormDefaults();
     $("new-client-id").focus();
-  } else {
+  } else if (clientConfig) {
     fillClientForm(clientConfig, deployment);
   }
   renderDeploymentGuide();
@@ -565,6 +566,7 @@ function closeClientModal() {
   $("client-modal").hidden = true;
   state.clientDeployment = null;
   state.editingClientConfigId = "";
+  if ($("client-edit-actions")) $("client-edit-actions").hidden = true;
   renderDeploymentGuide();
 }
 
@@ -753,7 +755,9 @@ async function createClientConfig(event) {
       fillClientForm(clientConfig, deployment);
       state.editingClientConfigId = clientConfig.id;
       showToast(isEditing ? "Client config updated" : "Client config saved");
-      $("client-modal-title").textContent = "Edit Client Deployment";
+      $("client-modal-title").textContent = "Client Deployment";
+      $("client-create-form").hidden = true;
+      if ($("client-edit-actions")) $("client-edit-actions").hidden = false;
       render();
     })
     .catch((error) => showToast(error.message));
@@ -764,7 +768,7 @@ async function showClientDeployment(clientId) {
   if (!clientConfig) return;
   await api(`/admin/api/client-configs/${clientConfig.id}/deployment`)
     .then(({ clientConfig: editableConfig, deployment }) => {
-      openClientModal({ mode: "edit", deployment, clientConfig: editableConfig });
+      openClientModal({ mode: "view", deployment, clientConfig: editableConfig });
     })
     .catch((error) => showToast(error.message));
 }
@@ -775,6 +779,14 @@ function bindEvents() {
   $("token-create-form").addEventListener("submit", createApiToken);
   $("toggle-client-create")?.addEventListener("click", () => {
     if ($("client-modal")) openClientModal({ mode: "create" });
+  });
+  $("edit-client-config")?.addEventListener("click", () => {
+    const clientConfig = state.clientConfigs.find((item) => item.id === state.editingClientConfigId);
+    if (!clientConfig) return;
+    $("client-create-form").hidden = false;
+    $("client-edit-actions").hidden = true;
+    $("client-modal-title").textContent = "Edit Client Deployment";
+    fillClientForm(clientConfig, state.clientDeployment);
   });
   document.querySelectorAll("[data-close-client-modal]").forEach((node) => {
     node.addEventListener("click", closeClientModal);
