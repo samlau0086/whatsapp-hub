@@ -13,6 +13,7 @@ const state = {
   apiTokenPermissions: [],
   clientConfigs: [],
   clientDeployment: null,
+  deploymentTab: "env",
   socket: null,
   clientFilter: "all",
   selectedClientId: "",
@@ -449,20 +450,41 @@ function renderDeploymentGuide() {
     return;
   }
   const clientId = deploymentClientId(state.clientDeployment);
+  const blocks = {
+    env: {
+      label: ".env",
+      filename: `${clientId}.env`,
+      content: state.clientDeployment.env,
+      note: "Save this file as .env in the same folder as the agent script."
+    },
+    linux: {
+      label: "Linux / macOS",
+      filename: `${clientId}-install.sh`,
+      content: state.clientDeployment.linux,
+      note: `Download and run: chmod +x ${clientId}-install.sh && ./${clientId}-install.sh`
+    },
+    windowsPowerShell: {
+      label: "Windows PowerShell",
+      filename: `${clientId}-install.ps1`,
+      content: state.clientDeployment.windowsPowerShell,
+      note: `Run with PowerShell, or: powershell -ExecutionPolicy Bypass -File .\\${clientId}-install.ps1`
+    }
+  };
+  const activeBlock = blocks[state.deploymentTab] || blocks.env;
   container.hidden = false;
   container.innerHTML = `
     <div class="deployment-head">
       <strong>Client deployment</strong>
       <button class="ghost-button" type="button" data-copy-deployment>Copy Linux guide</button>
     </div>
-    <p>Run this on the internal-network computer. Download the .env file and the script for your OS, then execute the script in the same folder.</p>
-    <div class="run-notes">
-      <span>Linux/macOS: <code>chmod +x ${escapeHtml(clientId)}-install.sh && ./${escapeHtml(clientId)}-install.sh</code></span>
-      <span>Windows PowerShell: right-click <code>${escapeHtml(clientId)}-install.ps1</code>, run with PowerShell, or run <code>powershell -ExecutionPolicy Bypass -File .\\${escapeHtml(clientId)}-install.ps1</code>.</span>
+    <p>Download the .env file and the script for your OS, put them in the same folder, then run the script on the internal-network computer.</p>
+    <div class="deployment-tabs" role="tablist">
+      ${Object.entries(blocks).map(([key, block]) => `
+        <button class="deployment-tab ${state.deploymentTab === key ? "active" : ""}" type="button" data-deployment-tab="${escapeHtml(key)}">${escapeHtml(block.label)}</button>
+      `).join("")}
     </div>
-    ${deploymentCodeBlock(".env", "env", `${clientId}.env`, state.clientDeployment.env)}
-    ${deploymentCodeBlock("Linux / macOS", "linux", `${clientId}-install.sh`, state.clientDeployment.linux)}
-    ${deploymentCodeBlock("Windows PowerShell", "windowsPowerShell", `${clientId}-install.ps1`, state.clientDeployment.windowsPowerShell)}
+    <div class="run-notes"><span>${escapeHtml(activeBlock.note)}</span></div>
+    ${deploymentCodeBlock(activeBlock.label, state.deploymentTab, activeBlock.filename, activeBlock.content)}
   `;
 }
 
@@ -498,6 +520,7 @@ function downloadTextFile(filename, content) {
 function openClientModal({ mode = "create", deployment = null } = {}) {
   if (!$("client-modal")) return;
   state.clientDeployment = deployment;
+  state.deploymentTab = "env";
   $("client-modal-title").textContent = mode === "create" ? "New WhatsApp Client" : "Client Deployment";
   $("client-create-form").hidden = mode !== "create";
   $("client-modal").hidden = false;
@@ -711,6 +734,12 @@ function bindEvents() {
     $("new-client-cache-path").placeholder = clientId ? `./.wwebjs_cache_${clientId}` : "./.wwebjs_cache_office-pc-01";
   });
   $("client-deployment")?.addEventListener("click", async (event) => {
+    const tab = event.target.closest("[data-deployment-tab]");
+    if (tab) {
+      state.deploymentTab = tab.dataset.deploymentTab;
+      renderDeploymentGuide();
+      return;
+    }
     const download = event.target.closest("[data-download-deployment]");
     if (download && state.clientDeployment) {
       const key = download.dataset.downloadDeployment;
