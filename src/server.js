@@ -632,28 +632,8 @@ function buildClientDeployment(clientConfig, token, fallbackHubUrl = config.publ
     env,
     agentUrl: new URL("wwebjs-client.js", agentBaseUrl).toString(),
     packageUrl: new URL("package.json", agentBaseUrl).toString(),
-    linux: [
-      `mkdir -p whatsapp-agent-${resolved.clientId}`,
-      `cd whatsapp-agent-${resolved.clientId}`,
-      `curl -fsSL ${new URL("package.json", agentBaseUrl).toString()} -o package.json`,
-      `curl -fsSL ${new URL("wwebjs-client.js", agentBaseUrl).toString()} -o wwebjs-client.js`,
-      "cat > .env <<'EOF'",
-      env,
-      "EOF",
-      "npm install",
-      "npm start"
-    ].join("\n"),
-    windowsPowerShell: [
-      `New-Item -ItemType Directory -Force whatsapp-agent-${resolved.clientId} | Out-Null`,
-      `Set-Location whatsapp-agent-${resolved.clientId}`,
-      `Invoke-WebRequest "${new URL("package.json", agentBaseUrl).toString()}" -OutFile package.json`,
-      `Invoke-WebRequest "${new URL("wwebjs-client.js", agentBaseUrl).toString()}" -OutFile wwebjs-client.js`,
-      "@'",
-      env,
-      "'@ | Set-Content -Encoding utf8 .env",
-      "npm install",
-      "npm start"
-    ].join("\n")
+    linux: buildLinuxAgentScript({ clientId: resolved.clientId, agentBaseUrl, env }),
+    windowsPowerShell: buildWindowsAgentScript({ clientId: resolved.clientId, agentBaseUrl, env })
   };
 }
 
@@ -665,6 +645,125 @@ function requestPublicBaseUrl(req) {
 
 function quoteEnv(value) {
   return `"${String(value || "").replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/\n/g, "\\n")}"`;
+}
+
+function buildLinuxAgentScript({ clientId, agentBaseUrl, env }) {
+  return [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "",
+    "need_node_major=18",
+    "",
+    "has_node() {",
+    "  command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 && [ \"$(node -p 'Number(process.versions.node.split(`.`)[0])')\" -ge \"$need_node_major\" ];",
+    "}",
+    "",
+    "install_node() {",
+    "  if has_node; then",
+    "    return",
+    "  fi",
+    "  echo \"Node.js ${need_node_major}+ and npm are required. Installing when possible...\"",
+    "  if [ \"$(uname -s)\" = \"Darwin\" ]; then",
+    "    if command -v brew >/dev/null 2>&1; then",
+    "      brew install node",
+    "    else",
+    "      echo \"Homebrew is not installed. Install Node.js LTS from https://nodejs.org, then rerun this script.\" >&2",
+    "      exit 1",
+    "    fi",
+    "  elif command -v apt-get >/dev/null 2>&1; then",
+    "    sudo apt-get update",
+    "    sudo apt-get install -y ca-certificates curl gnupg",
+    "    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -",
+    "    sudo apt-get install -y nodejs",
+    "    sudo apt-get install -y libnss3 libatk-bridge2.0-0 libgtk-3-0 libxss1 libasound2 libgbm1 || true",
+    "  elif command -v dnf >/dev/null 2>&1; then",
+    "    sudo dnf install -y nodejs npm nss atk at-spi2-atk gtk3 libXScrnSaver alsa-lib mesa-libgbm",
+    "  elif command -v yum >/dev/null 2>&1; then",
+    "    sudo yum install -y nodejs npm nss atk at-spi2-atk gtk3 libXScrnSaver alsa-lib mesa-libgbm",
+    "  elif command -v pacman >/dev/null 2>&1; then",
+    "    sudo pacman -Sy --needed nodejs npm nss atk at-spi2-atk gtk3 libxss alsa-lib mesa",
+    "  else",
+    "    echo \"No supported package manager found. Install Node.js LTS and npm manually, then rerun this script.\" >&2",
+    "    exit 1",
+    "  fi",
+    "  has_node || { echo \"Node.js/npm installation failed or version is too old.\" >&2; exit 1; }",
+    "}",
+    "",
+    "download_file() {",
+    "  url=\"$1\"",
+    "  output=\"$2\"",
+    "  if command -v curl >/dev/null 2>&1; then",
+    "    curl -fsSL \"$url\" -o \"$output\"",
+    "  elif command -v wget >/dev/null 2>&1; then",
+    "    wget -q \"$url\" -O \"$output\"",
+    "  else",
+    "    echo \"curl or wget is required to download agent files.\" >&2",
+    "    exit 1",
+    "  fi",
+    "}",
+    "",
+    "install_node",
+    `mkdir -p whatsapp-agent-${shellSingleQuote(clientId)}`,
+    `cd whatsapp-agent-${shellSingleQuote(clientId)}`,
+    `download_file ${shellSingleQuote(new URL("package.json", agentBaseUrl).toString())} package.json`,
+    `download_file ${shellSingleQuote(new URL("wwebjs-client.js", agentBaseUrl).toString())} wwebjs-client.js`,
+    "cat > .env <<'EOF'",
+    env,
+    "EOF",
+    "npm install --omit=dev",
+    "npm start"
+  ].join("\n");
+}
+
+function buildWindowsAgentScript({ clientId, agentBaseUrl, env }) {
+  return [
+    "$ErrorActionPreference = \"Stop\"",
+    "$requiredMajor = 18",
+    "",
+    "function Test-NodeReady {",
+    "  $node = Get-Command node -ErrorAction SilentlyContinue",
+    "  $npm = Get-Command npm -ErrorAction SilentlyContinue",
+    "  if (-not $node -or -not $npm) { return $false }",
+    "  $major = [int]((node -p \"process.versions.node.split('.')[0]\") 2>$null)",
+    "  return $major -ge $requiredMajor",
+    "}",
+    "",
+    "function Install-Node {",
+    "  if (Test-NodeReady) { return }",
+    "  Write-Host \"Node.js $requiredMajor+ and npm are required. Installing when possible...\"",
+    "  if (Get-Command winget -ErrorAction SilentlyContinue) {",
+    "    winget install --id OpenJS.NodeJS.LTS -e --accept-package-agreements --accept-source-agreements",
+    "  } elseif (Get-Command choco -ErrorAction SilentlyContinue) {",
+    "    choco install nodejs-lts -y",
+    "  } else {",
+    "    throw \"Install Node.js LTS from https://nodejs.org, reopen PowerShell, then rerun this script.\"",
+    "  }",
+    "  $machinePath = [Environment]::GetEnvironmentVariable(\"Path\", \"Machine\")",
+    "  $userPath = [Environment]::GetEnvironmentVariable(\"Path\", \"User\")",
+    "  $env:Path = \"$machinePath;$userPath\"",
+    "  if (-not (Test-NodeReady)) { throw \"Node.js/npm installation failed or PowerShell needs to be reopened.\" }",
+    "}",
+    "",
+    "Install-Node",
+    `$agentDir = "whatsapp-agent-${powerShellString(clientId)}"`,
+    "New-Item -ItemType Directory -Force $agentDir | Out-Null",
+    "Set-Location $agentDir",
+    `Invoke-WebRequest "${new URL("package.json", agentBaseUrl).toString()}" -OutFile package.json`,
+    `Invoke-WebRequest "${new URL("wwebjs-client.js", agentBaseUrl).toString()}" -OutFile wwebjs-client.js`,
+    "@'",
+    env,
+    "'@ | Set-Content -Encoding utf8 .env",
+    "npm install --omit=dev",
+    "npm start"
+  ].join("\n");
+}
+
+function shellSingleQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function powerShellString(value) {
+  return String(value).replace(/`/g, "``").replace(/"/g, "`\"");
 }
 
 async function createAndDispatchMessageTask(req, res) {

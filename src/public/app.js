@@ -478,7 +478,7 @@ function renderDeploymentGuide() {
       <strong>Client deployment</strong>
       <button class="ghost-button" type="button" data-copy-deployment>Copy Linux guide</button>
     </div>
-    <p>Download the .env file and the script for your OS, put them in the same folder, then run the script on the internal-network computer.</p>
+    <p>Download the .env file and the script for your OS, put them in the same folder, then run the script on the internal-network computer. The script checks Node.js/npm first and installs them when a supported package manager is available.</p>
     ${deploymentConfigSummary(state.clientDeployment.config)}
     <div class="deployment-tabs" role="tablist">
       ${Object.entries(blocks).map(([key, block]) => `
