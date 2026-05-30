@@ -48,6 +48,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -479,6 +483,11 @@ p {
   display: flex;
   gap: 8px;
   justify-content: space-between;
+}
+
+.deployment-toolbar {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .deployment-guide p,
