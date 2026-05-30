@@ -788,6 +788,16 @@ function bindEvents() {
     $("client-modal-title").textContent = "Edit Client Deployment";
     fillClientForm(clientConfig, state.clientDeployment);
   });
+  $("cancel-client-edit")?.addEventListener("click", () => {
+    if (state.clientDeployment) {
+      $("client-create-form").hidden = true;
+      $("client-edit-actions").hidden = false;
+      $("client-modal-title").textContent = "Client Deployment";
+      renderDeploymentGuide();
+      return;
+    }
+    closeClientModal();
+  });
   document.querySelectorAll("[data-close-client-modal]").forEach((node) => {
     node.addEventListener("click", closeClientModal);
   });
