@@ -1,5 +1,517 @@
 # WhatsApp Actor Hub
 
+## 手动部署说明（适合不懂技术的完整步骤）
+
+这一节按“从零开始”的方式写。你只需要准备：
+
+- 一台 VPS 服务器，推荐 Ubuntu 22.04 或 Ubuntu 24.04。
+- 一个域名，例如 `ws.example.com`。
+- 一个能登录 VPS 的 SSH 工具，例如 Windows Terminal、PuTTY、FinalShell、Xshell。
+- 一个 GitHub 仓库，里面放着本项目代码。
+
+下面示例统一使用：
+
+- 域名：`ws.example.com`
+- 项目目录：`/opt/whatsapp-hub`
+- Hub 内部端口：`3000`
+- Nginx 对外提供 HTTPS
+
+实际部署时请把 `ws.example.com` 换成你自己的域名。
+
+### 第 1 步：把域名指向 VPS
+
+到你的域名 DNS 管理后台添加一条记录：
+
+```text
+类型: A
+主机记录: ws
+记录值: 你的 VPS 公网 IP
+```
+
+如果你的域名是 `example.com`，那么这条记录会生成：
+
+```text
+ws.example.com
+```
+
+等待 1 到 10 分钟后，在自己电脑上测试：
+
+```bash
+ping ws.example.com
+```
+
+如果能看到你的 VPS IP，说明解析基本正常。
+
+### 第 2 步：登录 VPS
+
+在你电脑上打开终端，执行：
+
+```bash
+ssh root@你的VPS公网IP
+```
+
+如果你的 VPS 用户不是 `root`，就把 `root` 换成你的用户名。
+
+登录成功后，后续命令都在 VPS 里执行。
+
+### 第 3 步：安装基础工具和 Docker
+
+Ubuntu VPS 执行：
+
+```bash
+apt update
+apt install -y git curl nano ufw
+```
+
+安装 Docker：
+
+```bash
+curl -fsSL https://get.docker.com | sh
+```
+
+确认 Docker 可用：
+
+```bash
+docker --version
+docker compose version
+```
+
+如果能显示版本号，说明安装成功。
+
+### 第 4 步：开放防火墙端口
+
+如果你使用 Ubuntu 的 `ufw` 防火墙，执行：
+
+```bash
+ufw allow 22
+ufw allow 80
+ufw allow 443
+ufw --force enable
+ufw status
+```
+
+说明：
+
+- `22` 是 SSH 登录端口。
+- `80` 是申请 HTTPS 证书时需要用到。
+- `443` 是正式 HTTPS 访问端口。
+
+### 第 5 步：下载项目代码
+
+进入 `/opt`：
+
+```bash
+mkdir -p /opt
+cd /opt
+```
+
+如果你的项目在 GitHub，例如：
+
+```text
+https://github.com/你的用户名/whatsapp-hub.git
+```
+
+执行：
+
+```bash
+git clone https://github.com/你的用户名/whatsapp-hub.git
+cd whatsapp-hub
+```
+
+如果目录已经存在，想更新代码：
+
+```bash
+cd /opt/whatsapp-hub
+git pull
+```
+
+### 第 6 步：创建生产环境配置文件
+
+在项目目录里创建 `hub.env`：
+
+```bash
+cd /opt/whatsapp-hub
+nano hub.env
+```
+
+粘贴下面内容，并按自己的情况修改：
+
+```bash
+PORT=3000
+DATABASE_PATH=./data/hub.sqlite
+UPLOAD_DIR=./data/uploads
+HUB_API_TOKEN=请换成一段很长的随机字符串
+WEB_ADMIN_USERNAME=admin
+WEB_ADMIN_PASSWORD=请换成后台管理员密码
+PUBLIC_BASE_URL=https://ws.example.com
+TRUST_PROXY=true
+HOST_BIND_ADDRESS=127.0.0.1
+HOST_PORT=3000
+CLIENT_OFFLINE_AFTER_MS=45000
+```
+
+重点说明：
+
+- `HUB_API_TOKEN`：旧版 API token，也可作为紧急备用 token。请设置得很长，不要用 `123456`。
+- `WEB_ADMIN_USERNAME`：第一次启动时创建的 Web 后台管理员用户名。
+- `WEB_ADMIN_PASSWORD`：第一次启动时创建的 Web 后台管理员密码。
+- `PUBLIC_BASE_URL`：必须填写你的正式 HTTPS 域名。
+- `HOST_BIND_ADDRESS=127.0.0.1`：表示 Hub 只让本机 Nginx 访问，不直接暴露 3000 端口到公网。
+- `HOST_PORT=3000`：如果 VPS 上 3000 被占用，可以改成 `3001`，Nginx 也要同步改。
+
+保存 nano：
+
+- 按 `Ctrl + O`
+- 回车
+- 按 `Ctrl + X`
+
+### 第 7 步：启动 Hub
+
+在项目目录执行：
+
+```bash
+docker compose up -d --build
+```
+
+查看容器是否运行：
+
+```bash
+docker compose ps
+```
+
+查看日志：
+
+```bash
+docker compose logs -f
+```
+
+如果看到类似：
+
+```text
+whatsapp actor hub listening on https://ws.example.com
+```
+
+说明 Hub 服务已经启动。
+
+### 第 8 步：安装 Nginx
+
+```bash
+apt install -y nginx
+```
+
+创建 Nginx 配置：
+
+```bash
+nano /etc/nginx/sites-available/whatsapp-hub
+```
+
+粘贴下面内容，把 `ws.example.com` 换成你的域名：
+
+```nginx
+server {
+  listen 80;
+  server_name ws.example.com;
+
+  location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+  }
+}
+```
+
+启用配置：
+
+```bash
+ln -s /etc/nginx/sites-available/whatsapp-hub /etc/nginx/sites-enabled/whatsapp-hub
+nginx -t
+systemctl reload nginx
+```
+
+如果 `nginx -t` 显示 `successful`，说明配置正确。
+
+### 第 9 步：申请 HTTPS 证书
+
+安装 Certbot：
+
+```bash
+apt install -y certbot python3-certbot-nginx
+```
+
+申请证书：
+
+```bash
+certbot --nginx -d ws.example.com
+```
+
+按提示填写邮箱并同意协议。
+
+完成后测试：
+
+```bash
+curl -I https://ws.example.com
+```
+
+如果能看到 `HTTP/2 200`、`HTTP/1.1 200`、`302` 等响应，说明 HTTPS 正常。
+
+### 第 10 步：登录 Web 后台
+
+浏览器打开：
+
+```text
+https://ws.example.com/login
+```
+
+输入你在 `hub.env` 中设置的：
+
+```text
+WEB_ADMIN_USERNAME
+WEB_ADMIN_PASSWORD
+```
+
+登录后建议先做两件事：
+
+1. 到 `User Management` 创建你日常使用的管理员用户。
+2. 到 `API Tokens` 创建业务系统使用的 API token，并只勾选需要的权限。
+
+### 第 11 步：新增 WhatsApp Client
+
+在 Web 后台：
+
+1. 找到 `Clients` 区域。
+2. 点击 `New`。
+3. 填写：
+   - `Client ID`：例如 `office-pc-01`，每台电脑必须不同。
+   - `Client name`：例如 `办公室电脑 01`。
+   - `Hub URL`：一般会自动填写，例如 `https://ws.example.com`。
+   - `Auth data path`：保持默认即可。
+   - `Cache path`：保持默认即可。
+   - `Proxy URL`：如果这台电脑需要代理访问 WhatsApp Web，就填，例如 `socks5://127.0.0.1:1080`；不需要就留空。
+4. 保存。
+
+保存后会出现 `Client deployment` 部署说明。
+
+如果是 Windows 用户：
+
+1. 切换到 `Windows BAT`。
+2. 下载 `.env`。
+3. 下载 `xxx-install.bat`。
+4. 把两个文件放到同一个文件夹。
+5. 双击 `xxx-install.bat`。
+
+首次运行后，脚本会自动生成：
+
+```text
+start-agent.bat
+```
+
+以后再次启动这个 WhatsApp client，只需要双击：
+
+```text
+start-agent.bat
+```
+
+### 第 12 步：扫码登录 WhatsApp
+
+首次运行 agent 时，WhatsApp 需要扫码登录。
+
+脚本会在 agent 文件夹里生成二维码图片：
+
+```text
+whatsapp-qr-latest.png
+```
+
+操作方式：
+
+1. 打开 `whatsapp-qr-latest.png`。
+2. 手机打开 WhatsApp。
+3. 进入“已关联设备 / Linked devices”。
+4. 扫描图片里的二维码。
+5. 等待 agent 窗口显示 ready。
+
+扫码成功后，Web 后台的 Clients 列表里应该能看到该 client 变成 online。
+
+### 第 13 步：测试发送消息
+
+在 Web 后台可以直接测试发送：
+
+1. 选择在线 client，或使用随机在线 client。
+2. 输入目标手机号。
+3. 输入消息内容。
+4. 点击发送。
+
+也可以使用 API 测试：
+
+```bash
+curl -X POST https://ws.example.com/api/tasks/send-message \
+  -H "content-type: application/json" \
+  -H "Authorization: Bearer 你的API_TOKEN" \
+  -d '{"to":"15551234567","body":"hello from hub"}'
+```
+
+注意：
+
+- `to` 里填目标手机号，不是 WhatsApp client 自己的手机号。
+- 如果 API token 没有 `tasks:send` 权限，会返回 forbidden。
+- 如果 token 错误，会返回 unauthorized。
+
+### 第 14 步：以后如何更新 Hub
+
+如果代码有更新，在 VPS 上执行：
+
+```bash
+cd /opt/whatsapp-hub
+git pull
+docker compose up -d --build
+```
+
+查看日志：
+
+```bash
+docker compose logs -f
+```
+
+更新不会删除数据库，因为 `docker-compose.yml` 已经把数据目录挂载到：
+
+```text
+./data:/app/data
+```
+
+请不要随便删除 `/opt/whatsapp-hub/data`，否则用户、token、client、消息、任务记录都会丢失。
+
+### 第 15 步：常见问题
+
+#### 1. 打不开 Web 后台
+
+检查容器：
+
+```bash
+cd /opt/whatsapp-hub
+docker compose ps
+docker compose logs --tail=100
+```
+
+检查 Nginx：
+
+```bash
+nginx -t
+systemctl status nginx
+```
+
+检查域名是否解析到 VPS：
+
+```bash
+ping ws.example.com
+```
+
+#### 2. 提示 unauthorized
+
+通常是 token 不对。
+
+请确认：
+
+- 使用的是 Web 后台生成时显示的明文 token，不是 token id。
+- 请求头格式正确：
+
+```text
+Authorization: Bearer 你的token
+```
+
+也可以测试：
+
+```bash
+curl https://ws.example.com/api/auth/check \
+  -H "Authorization: Bearer 你的token"
+```
+
+返回 `ok: true` 才说明 token 可用。
+
+#### 3. Client 一直 offline
+
+检查内网电脑上的 agent 窗口。
+
+常见原因：
+
+- agent 没启动。
+- 网络无法访问 `https://ws.example.com`。
+- client token 错误。
+- 公司网络或代理阻止 WhatsApp Web。
+- 同一个 `Client ID` 被另一台电脑占用，后上线的会挤掉前一个。
+
+#### 4. 每次启动都要重新扫码
+
+通常是登录状态目录没有保留。
+
+请确认：
+
+- `CLIENT_ID` 没变。
+- `WWEBJS_AUTH_DATA_PATH` 没变。
+- 没删除 `.wwebjs_auth_xxx` 目录。
+- 没换 Windows 用户运行。
+- 运行脚本的文件夹没有被清理软件删除。
+
+#### 5. Windows 用户运行 BAT 失败
+
+先确认：
+
+- 不要把 BAT 放在压缩包里直接运行，要先解压。
+- `.env` 和 `xxx-install.bat` 放在同一个文件夹。
+- 首次运行后，以后运行 `start-agent.bat`。
+- 如果提示安装 Node.js，请允许安装。
+
+如果 `npm install` 失败，可以删除生成的 agent 文件夹后重新运行 install BAT。
+
+#### 6. 二维码在哪里
+
+agent 文件夹里会生成：
+
+```text
+whatsapp-qr-latest.png
+```
+
+打开这个图片扫码即可。
+
+#### 7. 3000 端口被占用
+
+修改 `hub.env`：
+
+```bash
+HOST_PORT=3001
+PORT=3000
+```
+
+然后修改 Nginx：
+
+```nginx
+proxy_pass http://127.0.0.1:3001;
+```
+
+最后重启：
+
+```bash
+docker compose up -d
+nginx -t
+systemctl reload nginx
+```
+
+### 第 16 步：日常维护建议
+
+- 定期备份 `/opt/whatsapp-hub/data`。
+- 不要把 `hub.env` 发给别人。
+- 不要在聊天、邮件、截图里泄露 API token。
+- 给不同外部业务系统生成不同 API token，方便单独 revoke。
+- 如果某台 client 不再使用，在 Web 后台删除它，并重新整理任务和消息记录。
+- VPS 系统建议定期更新：
+
+```bash
+apt update
+apt upgrade -y
+```
+
 一个用于调度多台内网 WhatsApp client 的 actor hub。推荐部署方式是：Hub 放在公网 VPS，所有内网电脑上的 WhatsApp client agent 主动连出到 VPS Hub。VPS 不需要反向访问内网机器。
 
 `whatsapp-web.js` 是 WhatsApp Web 的非官方 API，生产环境需要自行评估 WhatsApp 风控、封号、隐私和合规风险。
