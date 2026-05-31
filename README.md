@@ -140,7 +140,7 @@ nano hub.env
 PORT=3000
 DATABASE_PATH=./data/hub.sqlite
 UPLOAD_DIR=./data/uploads
-HUB_API_TOKEN=请换成一段很长的随机字符串
+HUB_API_TOKEN='请换成一段很长的随机字符串'
 WEB_ADMIN_USERNAME=admin
 WEB_ADMIN_PASSWORD=请换成后台管理员密码
 PUBLIC_BASE_URL=https://ws.example.com
@@ -153,6 +153,7 @@ CLIENT_OFFLINE_AFTER_MS=45000
 重点说明：
 
 - `HUB_API_TOKEN`：旧版 API token，也可作为紧急备用 token。请设置得很长，不要用 `123456`。
+  如果 token 里包含 `$`，请一定用英文单引号包起来，例如 `HUB_API_TOKEN='abc$123'`，否则 Docker Compose 可能把 `$123` 当成变量。
 - `WEB_ADMIN_USERNAME`：第一次启动时创建的 Web 后台管理员用户名。
 - `WEB_ADMIN_PASSWORD`：第一次启动时创建的 Web 后台管理员密码。
 - `PUBLIC_BASE_URL`：必须填写你的正式 HTTPS 域名。
@@ -170,7 +171,47 @@ CLIENT_OFFLINE_AFTER_MS=45000
 在项目目录执行：
 
 ```bash
+docker compose --env-file hub.env up -d --build
+```
+
+这里必须使用 `--env-file hub.env`。原因是 `docker-compose.yml` 里的端口映射会用到 `HOST_BIND_ADDRESS`、`HOST_PORT`、`PORT`，Docker Compose 在解析端口映射时不会读取 `env_file: hub.env`，只会读取命令行指定的 `--env-file` 或默认 `.env` 文件。
+
+如果你只执行：
+
+```bash
 docker compose up -d --build
+```
+
+那么即使 `hub.env` 里写了 `HOST_PORT=3011`，端口也可能仍然按默认值变成：
+
+```text
+127.0.0.1:3000->3000
+```
+
+如果你执行：
+
+```bash
+docker compose --env-file hub.env up -d --build
+```
+
+并且 `hub.env` 里写了：
+
+```bash
+HOST_PORT=3011
+PORT=3000
+```
+
+那么预期端口映射是：
+
+```text
+127.0.0.1:3011->3000
+```
+
+如果之前已经用错误端口启动过，先停掉旧容器再启动：
+
+```bash
+docker compose down
+docker compose --env-file hub.env up -d --build
 ```
 
 查看容器是否运行：
