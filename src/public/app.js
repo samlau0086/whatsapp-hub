@@ -288,6 +288,10 @@ function dedupeMessages(messages) {
   });
 }
 
+function sortMessagesOldestFirst(messages) {
+  return [...messages].sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+}
+
 function render() {
   const onlineCount = state.clients.filter((client) => client.status === "online").length;
   const runningCount = state.tasks.filter((task) => task.status === "running").length;
@@ -297,7 +301,7 @@ function render() {
   const tasks = scopedTasks();
   const messages = scopedMessages();
   const activeChatMessages = state.selectedChatId || state.selectedConversationKey
-    ? dedupeMessages(state.messages.filter((message) => messageMatchesActiveChat(message, activeChat)))
+    ? sortMessagesOldestFirst(dedupeMessages(state.messages.filter((message) => messageMatchesActiveChat(message, activeChat))))
     : [];
 
   applyLanguage();
