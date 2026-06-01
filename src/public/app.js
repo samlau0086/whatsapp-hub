@@ -20,6 +20,7 @@ const state = {
   clientFilter: "all",
   selectedClientId: "",
   selectedChatId: "",
+  selectedConversationKey: "",
   editingChatMapping: false
 };
 
@@ -228,7 +229,11 @@ function scopedMessages() {
 }
 
 function selectedChat() {
-  return state.chats.find((chat) => chat.chat_id === state.selectedChatId);
+  return state.chats.find((chat) => {
+    const key = chatConversationKey(chat);
+    return (state.selectedConversationKey && key === state.selectedConversationKey)
+      || chat.chat_id === state.selectedChatId;
+  });
 }
 
 function selectedChatPhone(chat = selectedChat()) {
@@ -236,17 +241,51 @@ function selectedChatPhone(chat = selectedChat()) {
   return /^\d+$/.test(key) ? key : "";
 }
 
+function chatConversationKey(chat) {
+  return String(chat?.conversation_key || chat?.contact_phone || chat?.conversation_id || chat?.chat_id || "");
+}
+
 function messageMatchesActiveChat(message, chat = selectedChat()) {
-  if (!state.selectedClientId || !state.selectedChatId || message.client_id !== state.selectedClientId) return false;
-  if (message.chat_id === state.selectedChatId) return true;
+  if (!state.selectedClientId || (!state.selectedChatId && !state.selectedConversationKey) || message.client_id !== state.selectedClientId) return false;
   const keys = new Set([
     chat?.contact_phone,
     chat?.conversation_key,
-    chat?.conversation_id
+    chat?.conversation_id,
+    state.selectedConversationKey
   ].filter(Boolean).map(String));
-  return keys.has(String(message.contact_phone || ""))
+  if (keys.has(String(message.contact_phone || ""))
     || keys.has(String(message.conversation_key || ""))
-    || keys.has(String(message.conversation_id || ""));
+    || keys.has(String(message.conversation_id || ""))) {
+    return true;
+  }
+  if (keys.size && selectedChatPhone(chat)) return false;
+  if (message.chat_id === state.selectedChatId) return true;
+  if (message.raw_chat_id === state.selectedChatId) return true;
+  if (chat?.chat_id && (message.chat_id === chat.chat_id || message.raw_chat_id === chat.chat_id)) return true;
+  return false;
+}
+
+function dedupeMessages(messages) {
+  const seen = new Set();
+  return messages.filter((message) => {
+    const key = message.payload?.taskId
+      ? `task:${message.payload.taskId}`
+      : message.external_id
+        ? `external:${message.client_id}:${message.external_id}`
+        : message.id || [
+      message.client_id,
+      message.direction,
+      message.external_id,
+      message.chat_id,
+      message.sender,
+      message.recipient,
+      message.body,
+      message.created_at
+    ].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function render() {
@@ -257,8 +296,8 @@ function render() {
   const visibleClients = filteredClients();
   const tasks = scopedTasks();
   const messages = scopedMessages();
-  const activeChatMessages = state.selectedChatId
-    ? state.messages.filter((message) => messageMatchesActiveChat(message, activeChat))
+  const activeChatMessages = state.selectedChatId || state.selectedConversationKey
+    ? dedupeMessages(state.messages.filter((message) => messageMatchesActiveChat(message, activeChat)))
     : [];
 
   applyLanguage();
@@ -309,7 +348,7 @@ function render() {
   $("send-client").value = activeClient?.status === "online" ? activeClient.id : "";
 
   $("chat-list").innerHTML = state.chats.length ? state.chats.map((chat) => `
-    <article class="chat-item ${chat.chat_id === state.selectedChatId ? "active" : ""}" data-chat-id="${escapeHtml(chat.chat_id)}">
+    <article class="chat-item ${chatConversationKey(chat) === state.selectedConversationKey ? "active" : ""}" data-chat-id="${escapeHtml(chat.chat_id)}" data-conversation-key="${escapeHtml(chatConversationKey(chat))}">
       <strong>${escapeHtml(chat.conversation_key || chat.contact_phone || chat.chat_id)}</strong>
       <span>${escapeHtml(chat.last_body || "")}</span>
       <span>${escapeHtml(String(chat.message_count))} messages / ${relativeTime(chat.last_message_at)}</span>
@@ -432,9 +471,9 @@ function render() {
 function renderActiveChatHeader(activeChat) {
   const title = $("active-chat-title");
   if (!title) return;
-  const display = activeChat?.conversation_key || activeChat?.contact_phone || state.selectedChatId || t("noChatSelected");
-  if (!state.selectedChatId || !state.editingChatMapping) {
-    title.innerHTML = `<span class="chat-title-text" title="${escapeHtml(state.selectedChatId || "")}">${escapeHtml(display)}</span>`;
+  const display = activeChat?.conversation_key || activeChat?.contact_phone || state.selectedConversationKey || state.selectedChatId || t("noChatSelected");
+  if ((!state.selectedChatId && !state.selectedConversationKey) || !state.editingChatMapping) {
+    title.innerHTML = `<span class="chat-title-text" title="${escapeHtml(state.selectedChatId || state.selectedConversationKey || "")}">${escapeHtml(display)}</span>`;
     return;
   }
   const currentPhone = activeChat?.contact_phone || (/^\d+$/.test(activeChat?.conversation_key || "") ? activeChat.conversation_key : "");
@@ -665,8 +704,9 @@ async function load() {
   ]);
   state.clients = clients.clients;
   state.tasks = tasks.tasks;
-  state.messages = messages.messages;
+  state.messages = dedupeMessages(messages.messages);
   state.chats = chats.chats;
+  syncSelectedChat();
   state.apiRequests = requests.requests;
   state.users = users.users;
   state.apiTokens = tokens.tokens;
@@ -689,8 +729,9 @@ async function refreshHubState() {
   ]);
   state.clients = clients.clients;
   state.tasks = tasks.tasks;
-  state.messages = messages.messages;
+  state.messages = dedupeMessages(messages.messages);
   state.chats = chats.chats;
+  syncSelectedChat();
   state.apiRequests = requests.requests;
   state.clientConfigs = clientConfigs.clientConfigs;
   render();
@@ -732,7 +773,7 @@ function connectSocket() {
   });
   state.socket.on("message:created", (message) => {
     if (!can("messages:read")) return;
-    state.messages = [message, ...state.messages.filter((item) => item.id !== message.id && item.payload?.taskId !== message.payload?.taskId)].slice(0, 50);
+    state.messages = dedupeMessages([message, ...state.messages.filter((item) => item.id !== message.id && item.payload?.taskId !== message.payload?.taskId)]).slice(0, 50);
     if (message.client_id === state.selectedClientId) refreshChats();
     render();
   });
@@ -744,20 +785,34 @@ async function refreshChats() {
     return;
   }
   state.chats = (await api(`/admin/api/chats?clientId=${encodeURIComponent(state.selectedClientId)}&limit=100`)).chats;
+  syncSelectedChat();
 }
 
 async function loadActiveChatMessages() {
-  if (!state.selectedClientId || !state.selectedChatId) return;
+  if (!state.selectedClientId || (!state.selectedChatId && !state.selectedConversationKey)) return;
   const chat = selectedChat();
   const phone = selectedChatPhone(chat);
   const query = phone
     ? `targetPhone=${encodeURIComponent(phone)}`
-    : `chatId=${encodeURIComponent(state.selectedChatId)}`;
+    : `chatId=${encodeURIComponent(chat?.chat_id || state.selectedChatId)}`;
   const messages = await api(`/admin/api/messages?clientId=${encodeURIComponent(state.selectedClientId)}&${query}&limit=100`);
-  state.messages = [
-    ...messages.messages,
+  state.messages = dedupeMessages([
+    ...dedupeMessages(messages.messages),
     ...state.messages.filter((message) => !messageMatchesActiveChat(message, chat))
-  ].slice(0, 200);
+  ]).slice(0, 200);
+}
+
+function syncSelectedChat() {
+  if (!state.selectedConversationKey && !state.selectedChatId) return;
+  const chat = selectedChat();
+  if (!chat) {
+    state.selectedChatId = "";
+    state.selectedConversationKey = "";
+    state.editingChatMapping = false;
+    return;
+  }
+  state.selectedChatId = chat.chat_id || state.selectedChatId;
+  state.selectedConversationKey = chatConversationKey(chat);
 }
 
 async function logout() {
@@ -1052,6 +1107,7 @@ function bindEvents() {
     const id = card.dataset.clientId;
     state.selectedClientId = state.selectedClientId === id ? "" : id;
     state.selectedChatId = "";
+    state.selectedConversationKey = "";
     state.editingChatMapping = false;
     refreshChats().then(render).catch((error) => showToast(error.message));
   });
@@ -1060,13 +1116,14 @@ function bindEvents() {
     const item = event.target.closest("[data-chat-id]");
     if (!item) return;
     state.selectedChatId = item.dataset.chatId;
+    state.selectedConversationKey = item.dataset.conversationKey || item.dataset.chatId;
     state.editingChatMapping = false;
     await loadActiveChatMessages();
     render();
   });
 
   $("active-chat-title").addEventListener("dblclick", () => {
-    if (!state.selectedClientId || !state.selectedChatId) return;
+    if (!state.selectedClientId || (!state.selectedChatId && !state.selectedConversationKey)) return;
     state.editingChatMapping = true;
     render();
     $("chat-phone-editor")?.focus();
@@ -1099,20 +1156,21 @@ function bindEvents() {
 
   $("chat-send-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!state.selectedClientId || !state.selectedChatId) return;
+    if (!state.selectedClientId || (!state.selectedChatId && !state.selectedConversationKey)) return;
     const body = $("chat-send-body").value.trim();
     const file = $("chat-file").files[0];
     if (!body && !file) return;
     const media = file ? await uploadChatFile(file) : null;
     const chat = selectedChat();
     const phone = selectedChatPhone(chat);
-    const target = phone || state.selectedChatId;
+    const rawChatId = chat?.chat_id || state.selectedChatId;
+    const target = phone || rawChatId;
     await api("/admin/api/tasks/send-message", {
       method: "POST",
       body: JSON.stringify({
         clientId: state.selectedClientId,
         to: target,
-        chatId: state.selectedChatId,
+        chatId: rawChatId,
         body,
         media
       })
@@ -1208,17 +1266,20 @@ async function uploadChatFile(file) {
 async function saveChatMapping() {
   const input = $("chat-phone-editor");
   const phone = input?.value.trim();
-  if (!phone || !state.selectedClientId || !state.selectedChatId) return;
+  const chat = selectedChat();
+  const rawChatId = chat?.chat_id || state.selectedChatId;
+  if (!phone || !state.selectedClientId || !rawChatId) return;
   await api("/admin/api/contact-mappings", {
     method: "PUT",
     body: JSON.stringify({
       clientId: state.selectedClientId,
       phone,
-      chatId: state.selectedChatId
+      chatId: rawChatId
     })
   })
     .then(async () => {
       state.editingChatMapping = false;
+      state.selectedConversationKey = phone.replace(/\D/g, "");
       await refreshChats();
       await loadActiveChatMessages();
       showToast("Phone mapping updated");
@@ -1229,16 +1290,18 @@ async function saveChatMapping() {
 
 function optimisticChatMessage({ task, body, media, phone }) {
   const createdAt = new Date().toISOString();
-  const conversationKey = phone || state.selectedChatId;
+  const chat = selectedChat();
+  const rawChatId = chat?.chat_id || state.selectedChatId;
+  const conversationKey = phone || state.selectedConversationKey || rawChatId;
   return {
     id: `pending-${task.id}`,
     external_id: null,
     client_id: state.selectedClientId,
     direction: "outbound",
-    chat_id: state.selectedChatId,
-    raw_chat_id: state.selectedChatId,
+    chat_id: rawChatId,
+    raw_chat_id: rawChatId,
     sender: state.selectedClientId,
-    recipient: phone || state.selectedChatId,
+    recipient: phone || rawChatId,
     body: body || media?.originalName || "",
     message_type: media ? "media" : "text",
     payload: {
@@ -1273,6 +1336,7 @@ function removeClientFromState(clientId) {
   if (state.selectedClientId === clientId) {
     state.selectedClientId = "";
     state.selectedChatId = "";
+    state.selectedConversationKey = "";
     state.chats = [];
   }
 }

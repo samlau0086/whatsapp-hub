@@ -541,16 +541,8 @@ export function createApiRequest(request) {
 
 export function getMessage(id) {
   return mapMessage(db.prepare(`
-    SELECT messages.*, cm.phone AS contact_phone
+    SELECT messages.*, ${contactPhoneSql("messages")} AS contact_phone
     FROM messages
-    LEFT JOIN contact_mappings cm
-      ON cm.client_id = messages.client_id
-      AND (
-        cm.chat_id = messages.chat_id
-        OR stripChatIdServer(cm.chat_id) = stripChatIdServer(messages.chat_id)
-        OR cm.phone = digitsOnly(messages.sender)
-        OR cm.phone = digitsOnly(messages.recipient)
-      )
     WHERE messages.id = ?
   `).get(id));
 }
@@ -573,7 +565,24 @@ export function listMessages({ clientId, sender, chatId, targetPhone, limit = 10
   if (targetPhone) {
     const phone = normalizePhone(targetPhone);
     const mappedChatIds = listChatIdsForPhone(phone, clientId);
-    where.push(`(cm.phone = @targetPhone OR messages.sender LIKE @targetPhoneLike OR messages.recipient LIKE @targetPhoneLike OR messages.chat_id LIKE @targetPhoneLike${mappedChatIds.length ? ` OR messages.chat_id IN (${mappedChatIds.map((_, index) => `@mappedChatId${index}`).join(", ")})` : ""})`);
+    where.push(`(
+      messages.sender LIKE @targetPhoneLike
+      OR messages.recipient LIKE @targetPhoneLike
+      OR messages.chat_id LIKE @targetPhoneLike
+      OR EXISTS (
+        SELECT 1
+        FROM contact_mappings cm
+        WHERE cm.client_id = messages.client_id
+          AND cm.phone = @targetPhone
+          AND (
+            cm.chat_id = messages.chat_id
+            OR stripChatIdServer(cm.chat_id) = stripChatIdServer(messages.chat_id)
+            OR cm.phone = digitsOnly(messages.sender)
+            OR cm.phone = digitsOnly(messages.recipient)
+          )
+      )
+      ${mappedChatIds.length ? `OR messages.chat_id IN (${mappedChatIds.map((_, index) => `@mappedChatId${index}`).join(", ")})` : ""}
+    )`);
     params.targetPhone = phone;
     params.targetPhoneLike = `%${phone}%`;
     mappedChatIds.forEach((mappedChatId, index) => {
@@ -582,16 +591,8 @@ export function listMessages({ clientId, sender, chatId, targetPhone, limit = 10
   }
   params.limit = Math.min(Number(limit) || 100, 500);
   const sql = `
-    SELECT messages.*, cm.phone AS contact_phone
+    SELECT messages.*, ${contactPhoneSql("messages")} AS contact_phone
     FROM messages
-    LEFT JOIN contact_mappings cm
-      ON cm.client_id = messages.client_id
-      AND (
-        cm.chat_id = messages.chat_id
-        OR stripChatIdServer(cm.chat_id) = stripChatIdServer(messages.chat_id)
-        OR cm.phone = digitsOnly(messages.sender)
-        OR cm.phone = digitsOnly(messages.recipient)
-      )
     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
     ORDER BY messages.created_at DESC
     LIMIT @limit
@@ -607,57 +608,47 @@ export function listChats({ clientId, limit = 100 } = {}) {
     params.clientId = clientId;
   }
   return db.prepare(`
+    WITH mapped_messages AS (
+      SELECT messages.*, ${contactPhoneSql("messages")} AS contact_phone
+      FROM messages
+      WHERE ${where.join(" AND ")}
+    )
     SELECT
-      COALESCE(cm.phone, messages.chat_id) AS conversation_id,
-      COALESCE(cm.phone, messages.chat_id) AS conversation_key,
-      cm.phone AS contact_phone,
-      messages.chat_id,
-      messages.client_id,
-      MAX(messages.created_at) AS last_message_at,
+      COALESCE(contact_phone, chat_id) AS conversation_id,
+      COALESCE(contact_phone, chat_id) AS conversation_key,
+      contact_phone,
+      COALESCE(
+        (
+          SELECT cm.chat_id
+          FROM contact_mappings cm
+          WHERE cm.client_id = mapped_messages.client_id
+            AND cm.phone = mapped_messages.contact_phone
+          ORDER BY cm.last_seen_at DESC
+          LIMIT 1
+        ),
+        chat_id
+      ) AS chat_id,
+      client_id,
+      MAX(created_at) AS last_message_at,
       COUNT(*) AS message_count,
       (
         SELECT body
-        FROM messages m2
-        LEFT JOIN contact_mappings cm2
-          ON cm2.client_id = m2.client_id
-          AND (
-            cm2.chat_id = m2.chat_id
-            OR stripChatIdServer(cm2.chat_id) = stripChatIdServer(m2.chat_id)
-            OR cm2.phone = digitsOnly(m2.sender)
-            OR cm2.phone = digitsOnly(m2.recipient)
-          )
-        WHERE m2.client_id = messages.client_id
-          AND COALESCE(cm2.phone, m2.chat_id) = COALESCE(cm.phone, messages.chat_id)
+        FROM mapped_messages m2
+        WHERE m2.client_id = mapped_messages.client_id
+          AND COALESCE(m2.contact_phone, m2.chat_id) = COALESCE(mapped_messages.contact_phone, mapped_messages.chat_id)
         ORDER BY m2.created_at DESC
         LIMIT 1
       ) AS last_body,
       (
         SELECT sender
-        FROM messages m2
-        LEFT JOIN contact_mappings cm2
-          ON cm2.client_id = m2.client_id
-          AND (
-            cm2.chat_id = m2.chat_id
-            OR stripChatIdServer(cm2.chat_id) = stripChatIdServer(m2.chat_id)
-            OR cm2.phone = digitsOnly(m2.sender)
-            OR cm2.phone = digitsOnly(m2.recipient)
-          )
-        WHERE m2.client_id = messages.client_id
-          AND COALESCE(cm2.phone, m2.chat_id) = COALESCE(cm.phone, messages.chat_id)
+        FROM mapped_messages m2
+        WHERE m2.client_id = mapped_messages.client_id
+          AND COALESCE(m2.contact_phone, m2.chat_id) = COALESCE(mapped_messages.contact_phone, mapped_messages.chat_id)
         ORDER BY m2.created_at DESC
         LIMIT 1
       ) AS last_sender
-    FROM messages
-    LEFT JOIN contact_mappings cm
-      ON cm.client_id = messages.client_id
-      AND (
-        cm.chat_id = messages.chat_id
-        OR stripChatIdServer(cm.chat_id) = stripChatIdServer(messages.chat_id)
-        OR cm.phone = digitsOnly(messages.sender)
-        OR cm.phone = digitsOnly(messages.recipient)
-      )
-    WHERE ${where.join(" AND ")}
-    GROUP BY messages.client_id, COALESCE(cm.phone, messages.chat_id)
+    FROM mapped_messages
+    GROUP BY client_id, COALESCE(contact_phone, chat_id)
     ORDER BY last_message_at DESC
     LIMIT @limit
   `).all(params);
@@ -829,6 +820,28 @@ function listChatIdsForPhone(phone, clientId) {
     ORDER BY last_seen_at DESC
     LIMIT 50
   `).all(params).map((row) => row.chat_id);
+}
+
+function contactPhoneSql(alias) {
+  return `(
+    SELECT cm.phone
+    FROM contact_mappings cm
+    WHERE cm.client_id = ${alias}.client_id
+      AND (
+        cm.chat_id = ${alias}.chat_id
+        OR stripChatIdServer(cm.chat_id) = stripChatIdServer(${alias}.chat_id)
+        OR cm.phone = digitsOnly(${alias}.sender)
+        OR cm.phone = digitsOnly(${alias}.recipient)
+      )
+    ORDER BY
+      CASE
+        WHEN cm.chat_id = ${alias}.chat_id THEN 0
+        WHEN stripChatIdServer(cm.chat_id) = stripChatIdServer(${alias}.chat_id) THEN 1
+        ELSE 2
+      END,
+      cm.last_seen_at DESC
+    LIMIT 1
+  )`;
 }
 
 function normalizePhone(value) {
