@@ -56,7 +56,7 @@ import {
   updateClientConfigAgentToken,
   updateUser
 } from "./db.js";
-import { chooseClient, createHub, forgetClientSocket, reconcileClientPresence } from "./hub.js";
+import { chooseClient, createHub, emitClientDeleted, forgetClientSocket, reconcileClientPresence } from "./hub.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -211,12 +211,15 @@ app.delete("/admin/api/clients/:id", requireWebSession, requirePermission("clien
   forgetClientSocket(req.params.id);
   setClientStatus(req.params.id, "offline");
   const deleted = removeClient(req.params.id);
+  if (deleted) emitClientDeleted(req.params.id);
   res.json({ ok: deleted });
 });
 
 app.delete("/admin/api/clients/:id/data", requireWebSession, requirePermission("clients:delete"), (req, res) => {
   forgetClientSocket(req.params.id);
-  res.json({ ok: true, deleted: purgeClientData(req.params.id) });
+  const deleted = purgeClientData(req.params.id);
+  emitClientDeleted(req.params.id);
+  res.json({ ok: true, deleted });
 });
 
 app.get("/admin/api/messages", requireWebSession, requirePermission("messages:read"), (req, res) => {
@@ -420,13 +423,16 @@ app.delete("/api/clients/:id", (req, res) => {
   forgetClientSocket(req.params.id);
   setClientStatus(req.params.id, "offline");
   const deleted = removeClient(req.params.id);
+  if (deleted) emitClientDeleted(req.params.id);
   res.json({ ok: deleted });
 });
 
 app.delete("/api/clients/:id/data", (req, res) => {
   if (!hasApiPermission(req, "clients:delete")) return res.status(403).json({ error: "forbidden" });
   forgetClientSocket(req.params.id);
-  res.json({ ok: true, deleted: purgeClientData(req.params.id) });
+  const deleted = purgeClientData(req.params.id);
+  emitClientDeleted(req.params.id);
+  res.json({ ok: true, deleted });
 });
 
 app.get("/api/clients/:id/messages", (req, res) => {

@@ -645,6 +645,11 @@ function connectSocket() {
     state.clients = [client, ...state.clients.filter((item) => item.id !== client.id)];
     render();
   });
+  state.socket.on("client:deleted", ({ id }) => {
+    if (!can("clients:read") || !id) return;
+    removeClientFromState(id);
+    render();
+  });
   state.socket.on("task:updated", (task) => {
     if (!can("tasks:read")) return;
     state.tasks = [task, ...state.tasks.filter((item) => item.id !== task.id)].slice(0, 50);
@@ -1073,14 +1078,24 @@ async function uploadChatFile(file) {
 async function removeClient(clientId) {
   await api(`/admin/api/clients/${clientId}/data`, { method: "DELETE" })
     .then(() => {
-      state.clients = state.clients.filter((client) => client.id !== clientId);
-      state.tasks = state.tasks.filter((task) => task.client_id !== clientId);
-      state.messages = state.messages.filter((message) => message.client_id !== clientId);
-      if (state.selectedClientId === clientId) state.selectedClientId = "";
+      removeClientFromState(clientId);
       showToast(t("clientRemoved"));
       render();
     })
     .catch((error) => showToast(error.message));
+}
+
+function removeClientFromState(clientId) {
+  state.clients = state.clients.filter((client) => client.id !== clientId);
+  state.clientConfigs = state.clientConfigs.filter((config) => config.client_id !== clientId);
+  state.tasks = state.tasks.filter((task) => task.client_id !== clientId);
+  state.messages = state.messages.filter((message) => message.client_id !== clientId);
+  state.chats = state.chats.filter((chat) => chat.client_id !== clientId);
+  if (state.selectedClientId === clientId) {
+    state.selectedClientId = "";
+    state.selectedChatId = "";
+    state.chats = [];
+  }
 }
 
 function setLanguage(language) {

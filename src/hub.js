@@ -189,6 +189,10 @@ export function forgetClientSocket(clientId) {
   socketsByClient.delete(clientId);
 }
 
+export function emitClientDeleted(clientId) {
+  activeIo?.emit("client:deleted", { id: clientId });
+}
+
 export async function dispatchQueuedTasksForClient(clientId) {
   if (!activeIo) return;
   for (const task of listQueuedTasksForClient(clientId, 20)) {
