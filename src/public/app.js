@@ -19,7 +19,8 @@ const state = {
   refreshTimer: null,
   clientFilter: "all",
   selectedClientId: "",
-  selectedChatId: ""
+  selectedChatId: "",
+  editingChatMapping: false
 };
 
 const $ = (id) => document.getElementById(id);
@@ -226,10 +227,15 @@ function scopedMessages() {
   return state.selectedClientId ? state.messages.filter((message) => message.client_id === state.selectedClientId) : state.messages;
 }
 
+function selectedChat() {
+  return state.chats.find((chat) => chat.chat_id === state.selectedChatId);
+}
+
 function render() {
   const onlineCount = state.clients.filter((client) => client.status === "online").length;
   const runningCount = state.tasks.filter((task) => task.status === "running").length;
   const activeClient = selectedClient();
+  const activeChat = selectedChat();
   const visibleClients = filteredClients();
   const tasks = scopedTasks();
   const messages = scopedMessages();
@@ -251,7 +257,7 @@ function render() {
   $("dispatch-hint").textContent = activeClient ? t("dispatchingWith", { name: activeClient.name || activeClient.id }) : t("randomClient");
   $("selected-client-pill").textContent = activeClient ? activeClient.id : t("noClientSelected");
   $("chat-summary").textContent = activeClient ? activeClient.id : t("selectClient");
-  $("active-chat-title").textContent = state.selectedChatId || t("noChatSelected");
+  renderActiveChatHeader(activeChat);
   $("active-chat-subtitle").textContent = activeClient ? activeClient.name || activeClient.id : t("selectChat");
   const createClientButton = $("toggle-client-create");
   if (createClientButton) createClientButton.hidden = !can("clients:delete");
@@ -403,6 +409,24 @@ function render() {
   document.querySelectorAll(".filter-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.filter === state.clientFilter);
   });
+}
+
+function renderActiveChatHeader(activeChat) {
+  const title = $("active-chat-title");
+  if (!title) return;
+  const display = activeChat?.conversation_key || activeChat?.contact_phone || state.selectedChatId || t("noChatSelected");
+  if (!state.selectedChatId || !state.editingChatMapping) {
+    title.innerHTML = `<span class="chat-title-text" title="${escapeHtml(state.selectedChatId || "")}">${escapeHtml(display)}</span>`;
+    return;
+  }
+  const currentPhone = activeChat?.contact_phone || (/^\d+$/.test(activeChat?.conversation_key || "") ? activeChat.conversation_key : "");
+  title.innerHTML = `
+    <span class="chat-mapping-editor">
+      <input id="chat-phone-editor" inputmode="tel" placeholder="Phone number" value="${escapeHtml(currentPhone)}" />
+      <button class="icon-button" type="button" title="OK" data-save-chat-mapping>OK</button>
+      <button class="ghost-button" type="button" data-cancel-chat-mapping>Cancel</button>
+    </span>
+  `;
 }
 
 function applyLanguage() {
@@ -996,6 +1020,7 @@ function bindEvents() {
     const id = card.dataset.clientId;
     state.selectedClientId = state.selectedClientId === id ? "" : id;
     state.selectedChatId = "";
+    state.editingChatMapping = false;
     refreshChats().then(render).catch((error) => showToast(error.message));
   });
 
@@ -1003,12 +1028,45 @@ function bindEvents() {
     const item = event.target.closest("[data-chat-id]");
     if (!item) return;
     state.selectedChatId = item.dataset.chatId;
+    state.editingChatMapping = false;
     const messages = await api(`/admin/api/messages?clientId=${encodeURIComponent(state.selectedClientId)}&chatId=${encodeURIComponent(state.selectedChatId)}&limit=100`);
     state.messages = [
       ...messages.messages,
       ...state.messages.filter((message) => message.client_id !== state.selectedClientId || message.chat_id !== state.selectedChatId)
     ].slice(0, 200);
     render();
+  });
+
+  $("active-chat-title").addEventListener("dblclick", () => {
+    if (!state.selectedClientId || !state.selectedChatId) return;
+    state.editingChatMapping = true;
+    render();
+    $("chat-phone-editor")?.focus();
+  });
+
+  $("active-chat-title").addEventListener("click", async (event) => {
+    const saveButton = event.target.closest("[data-save-chat-mapping]");
+    if (saveButton) {
+      await saveChatMapping();
+      return;
+    }
+    const cancelButton = event.target.closest("[data-cancel-chat-mapping]");
+    if (cancelButton) {
+      state.editingChatMapping = false;
+      render();
+    }
+  });
+
+  $("active-chat-title").addEventListener("keydown", async (event) => {
+    if (event.target.id !== "chat-phone-editor") return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      await saveChatMapping();
+    }
+    if (event.key === "Escape") {
+      state.editingChatMapping = false;
+      render();
+    }
   });
 
   $("chat-send-form").addEventListener("submit", async (event) => {
@@ -1107,6 +1165,32 @@ async function uploadChatFile(file) {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || res.statusText);
   return body.file;
+}
+
+async function saveChatMapping() {
+  const input = $("chat-phone-editor");
+  const phone = input?.value.trim();
+  if (!phone || !state.selectedClientId || !state.selectedChatId) return;
+  await api("/admin/api/contact-mappings", {
+    method: "PUT",
+    body: JSON.stringify({
+      clientId: state.selectedClientId,
+      phone,
+      chatId: state.selectedChatId
+    })
+  })
+    .then(async () => {
+      state.editingChatMapping = false;
+      await refreshChats();
+      const messages = await api(`/admin/api/messages?clientId=${encodeURIComponent(state.selectedClientId)}&chatId=${encodeURIComponent(state.selectedChatId)}&limit=100`);
+      state.messages = [
+        ...messages.messages,
+        ...state.messages.filter((message) => message.client_id !== state.selectedClientId || message.chat_id !== state.selectedChatId)
+      ].slice(0, 200);
+      showToast("Phone mapping updated");
+      render();
+    })
+    .catch((error) => showToast(error.message));
 }
 
 async function removeClient(clientId) {

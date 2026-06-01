@@ -328,6 +328,24 @@ p {
   padding: 14px 16px;
 }
 
+.chat-title-text {
+  cursor: text;
+  overflow-wrap: anywhere;
+}
+
+.chat-mapping-editor {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.chat-mapping-editor input {
+  max-width: 320px;
+  min-width: 180px;
+}
+
 .chat-messages {
   align-content: start;
   background: var(--surface-soft);
