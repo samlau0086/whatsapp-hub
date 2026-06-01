@@ -732,7 +732,7 @@ function connectSocket() {
   });
   state.socket.on("message:created", (message) => {
     if (!can("messages:read")) return;
-    state.messages = [message, ...state.messages.filter((item) => item.id !== message.id)].slice(0, 50);
+    state.messages = [message, ...state.messages.filter((item) => item.id !== message.id && item.payload?.taskId !== message.payload?.taskId)].slice(0, 50);
     if (message.client_id === state.selectedClientId) refreshChats();
     render();
   });
@@ -1104,11 +1104,14 @@ function bindEvents() {
     const file = $("chat-file").files[0];
     if (!body && !file) return;
     const media = file ? await uploadChatFile(file) : null;
+    const chat = selectedChat();
+    const phone = selectedChatPhone(chat);
+    const target = phone || state.selectedChatId;
     await api("/admin/api/tasks/send-message", {
       method: "POST",
       body: JSON.stringify({
         clientId: state.selectedClientId,
-        to: state.selectedChatId,
+        to: target,
         chatId: state.selectedChatId,
         body,
         media
@@ -1116,6 +1119,7 @@ function bindEvents() {
     })
       .then(({ task }) => {
         state.tasks = [task, ...state.tasks.filter((item) => item.id !== task.id)].slice(0, 50);
+        state.messages = [optimisticChatMessage({ task, body, media, phone }), ...state.messages].slice(0, 200);
         $("chat-send-body").value = "";
         $("chat-file").value = "";
         showToast(t("taskDispatched"));
@@ -1221,6 +1225,33 @@ async function saveChatMapping() {
       render();
     })
     .catch((error) => showToast(error.message));
+}
+
+function optimisticChatMessage({ task, body, media, phone }) {
+  const createdAt = new Date().toISOString();
+  const conversationKey = phone || state.selectedChatId;
+  return {
+    id: `pending-${task.id}`,
+    external_id: null,
+    client_id: state.selectedClientId,
+    direction: "outbound",
+    chat_id: state.selectedChatId,
+    raw_chat_id: state.selectedChatId,
+    sender: state.selectedClientId,
+    recipient: phone || state.selectedChatId,
+    body: body || media?.originalName || "",
+    message_type: media ? "media" : "text",
+    payload: {
+      pending: true,
+      taskId: task.id,
+      media: media || null
+    },
+    contact_phone: phone || null,
+    conversation_id: conversationKey,
+    conversation_key: conversationKey,
+    created_at: createdAt,
+    received_at: createdAt
+  };
 }
 
 async function removeClient(clientId) {
