@@ -1027,6 +1027,61 @@ npm install
 - Windows 报 `EPERM`、`operation not permitted`：关闭正在运行的 agent、Chrome、杀毒软件拦截窗口，再重新运行安装命令。
 - 已经手动装好 Node.js 后：重新打开终端，再运行生成的 `xxx-install.bat` 或 `npm install`。
 
+#### 运行时报 Could not find Chrome 怎么办
+
+如果启动 client agent 时看到类似错误：
+
+```text
+Error: Could not find Chrome (ver. 146.0.7680.31)
+your cache path is incorrectly configured: .puppeteer-cache
+```
+
+说明 Puppeteer 没找到可用的 Chrome。常见原因是安装依赖时 Chrome 下载失败，或者 `.puppeteer-cache` 目录里只有半下载的文件。
+
+优先处理方式：
+
+1. 在这台电脑上安装 Google Chrome 或 Microsoft Edge。
+2. 重新下载或更新最新的 `wwebjs-client.js`。
+3. 重新运行生成的 `xxx-install.bat`，或者直接运行 `start-agent.bat`。
+
+新版 agent 会自动寻找本机已安装的 Chrome / Edge。Windows 常见自动识别路径包括：
+
+```text
+C:\Program Files\Google\Chrome\Application\chrome.exe
+C:\Program Files (x86)\Google\Chrome\Application\chrome.exe
+C:\Users\你的用户名\AppData\Local\Google\Chrome\Application\chrome.exe
+C:\Program Files\Microsoft\Edge\Application\msedge.exe
+C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
+```
+
+如果仍然找不到，可以在 agent 文件夹的 `.env` 里手动填写：
+
+```bash
+PUPPETEER_EXECUTABLE_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
+PUPPETEER_SKIP_DOWNLOAD=true
+```
+
+如果你使用 Edge：
+
+```bash
+PUPPETEER_EXECUTABLE_PATH=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
+PUPPETEER_SKIP_DOWNLOAD=true
+```
+
+然后重新运行：
+
+```text
+start-agent.bat
+```
+
+如果 `.puppeteer-cache` 里有半下载内容，也可以删除后重试：
+
+```powershell
+Remove-Item -Recurse -Force .\.puppeteer-cache -ErrorAction SilentlyContinue
+```
+
+注意：如果这台电脑完全没有安装 Chrome / Edge，并且网络又无法下载 Puppeteer Chrome，client agent 就无法启动 WhatsApp Web。最简单的办法是先手动安装 Google Chrome 或 Microsoft Edge。
+
 ### Agent 环境变量
 
 在内网电脑的项目根目录创建 `.env`：

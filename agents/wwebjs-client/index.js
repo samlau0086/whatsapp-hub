@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
-import fs from "node:fs/promises";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import QRCode from "qrcode";
@@ -11,6 +12,9 @@ dotenv.config();
 
 const { Client, LocalAuth, MessageMedia } = pkg;
 
+const configuredExecutablePath = process.env.PUPPETEER_EXECUTABLE_PATH || "";
+const executablePath = resolveBrowserExecutablePath(configuredExecutablePath);
+
 const config = {
   hubUrl: process.env.HUB_URL || "http://localhost:3000",
   token: process.env.CLIENT_TOKEN || process.env.HUB_API_TOKEN || "dev-token",
@@ -21,7 +25,7 @@ const config = {
   proxyUrl: process.env.CLIENT_PROXY_URL || "",
   proxyUsername: process.env.CLIENT_PROXY_USERNAME || "",
   proxyPassword: process.env.CLIENT_PROXY_PASSWORD || "",
-  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || "",
+  executablePath,
   qrOutputDir: path.resolve(process.env.QR_OUTPUT_DIR || "."),
   headless: process.env.PUPPETEER_HEADLESS !== "false"
 };
@@ -64,6 +68,7 @@ const whatsapp = new Client({
 console.log(`auth data path: ${config.authDataPath}`);
 console.log(`web cache path: ${config.cachePath}`);
 console.log(`proxy: ${config.proxyUrl || "disabled"}`);
+console.log(`browser executable: ${config.executablePath || "Puppeteer managed Chrome"}`);
 console.log(`qr image output: ${config.qrOutputDir}`);
 
 function emitHello(status = "online") {
@@ -122,7 +127,7 @@ async function downloadMedia(mediaPayload) {
   const extension = path.extname(mediaPayload.originalName || "") || "";
   const filePath = path.join(os.tmpdir(), `wah-${Date.now()}-${Math.random().toString(16).slice(2)}${extension}`);
   const bytes = Buffer.from(await response.arrayBuffer());
-  await fs.writeFile(filePath, bytes);
+  await fsp.writeFile(filePath, bytes);
   return filePath;
 }
 
@@ -135,7 +140,7 @@ setInterval(() => {
 whatsapp.on("qr", async (qr) => {
   qrcodeTerminal.generate(qr, { small: true });
   try {
-    await fs.mkdir(config.qrOutputDir, { recursive: true });
+    await fsp.mkdir(config.qrOutputDir, { recursive: true });
     const clientQrPath = path.join(config.qrOutputDir, `whatsapp-qr-${safeFileName(config.clientId)}.png`);
     const latestQrPath = path.join(config.qrOutputDir, "whatsapp-qr-latest.png");
     await QRCode.toFile(clientQrPath, qr, { width: 420, margin: 2 });
@@ -185,4 +190,51 @@ whatsapp.initialize();
 
 function safeFileName(value) {
   return String(value || "client").replace(/[^a-zA-Z0-9_.-]/g, "-");
+}
+
+function findInstalledBrowser() {
+  const candidates = browserCandidates();
+  return candidates.find((candidate) => fs.existsSync(candidate)) || "";
+}
+
+function resolveBrowserExecutablePath(configuredPath) {
+  if (configuredPath && fs.existsSync(configuredPath)) {
+    return configuredPath;
+  }
+  if (configuredPath) {
+    console.warn(`PUPPETEER_EXECUTABLE_PATH does not exist: ${configuredPath}`);
+  }
+  return findInstalledBrowser();
+}
+
+function browserCandidates() {
+  if (process.platform === "win32") {
+    const roots = [
+      process.env.PROGRAMFILES,
+      process.env["PROGRAMFILES(X86)"],
+      process.env.LOCALAPPDATA
+    ].filter(Boolean);
+    return [
+      ...roots.map((root) => path.join(root, "Google", "Chrome", "Application", "chrome.exe")),
+      ...roots.map((root) => path.join(root, "Microsoft", "Edge", "Application", "msedge.exe")),
+      ...roots.map((root) => path.join(root, "Chromium", "Application", "chrome.exe"))
+    ];
+  }
+
+  if (process.platform === "darwin") {
+    return [
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium"
+    ];
+  }
+
+  return [
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+    "/snap/bin/chromium",
+    "/usr/bin/microsoft-edge-stable"
+  ];
 }
