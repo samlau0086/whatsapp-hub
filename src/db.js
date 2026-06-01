@@ -8,6 +8,7 @@ fs.mkdirSync(path.dirname(config.databasePath), { recursive: true });
 
 export const db = new Database(config.databasePath);
 db.pragma("journal_mode = WAL");
+db.function("stripChatIdServer", (value) => String(value || "").split("@")[0]);
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS clients (
@@ -542,7 +543,11 @@ export function getMessage(id) {
     SELECT messages.*, cm.phone AS contact_phone
     FROM messages
     LEFT JOIN contact_mappings cm
-      ON cm.client_id = messages.client_id AND cm.chat_id = messages.chat_id
+      ON cm.client_id = messages.client_id
+      AND (
+        cm.chat_id = messages.chat_id
+        OR stripChatIdServer(cm.chat_id) = stripChatIdServer(messages.chat_id)
+      )
     WHERE messages.id = ?
   `).get(id));
 }
@@ -577,7 +582,11 @@ export function listMessages({ clientId, sender, chatId, targetPhone, limit = 10
     SELECT messages.*, cm.phone AS contact_phone
     FROM messages
     LEFT JOIN contact_mappings cm
-      ON cm.client_id = messages.client_id AND cm.chat_id = messages.chat_id
+      ON cm.client_id = messages.client_id
+      AND (
+        cm.chat_id = messages.chat_id
+        OR stripChatIdServer(cm.chat_id) = stripChatIdServer(messages.chat_id)
+      )
     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
     ORDER BY messages.created_at DESC
     LIMIT @limit
@@ -605,7 +614,11 @@ export function listChats({ clientId, limit = 100 } = {}) {
         SELECT body
         FROM messages m2
         LEFT JOIN contact_mappings cm2
-          ON cm2.client_id = m2.client_id AND cm2.chat_id = m2.chat_id
+          ON cm2.client_id = m2.client_id
+          AND (
+            cm2.chat_id = m2.chat_id
+            OR stripChatIdServer(cm2.chat_id) = stripChatIdServer(m2.chat_id)
+          )
         WHERE m2.client_id = messages.client_id
           AND COALESCE(cm2.phone, m2.chat_id) = COALESCE(cm.phone, messages.chat_id)
         ORDER BY m2.created_at DESC
@@ -615,7 +628,11 @@ export function listChats({ clientId, limit = 100 } = {}) {
         SELECT sender
         FROM messages m2
         LEFT JOIN contact_mappings cm2
-          ON cm2.client_id = m2.client_id AND cm2.chat_id = m2.chat_id
+          ON cm2.client_id = m2.client_id
+          AND (
+            cm2.chat_id = m2.chat_id
+            OR stripChatIdServer(cm2.chat_id) = stripChatIdServer(m2.chat_id)
+          )
         WHERE m2.client_id = messages.client_id
           AND COALESCE(cm2.phone, m2.chat_id) = COALESCE(cm.phone, messages.chat_id)
         ORDER BY m2.created_at DESC
@@ -623,7 +640,11 @@ export function listChats({ clientId, limit = 100 } = {}) {
       ) AS last_sender
     FROM messages
     LEFT JOIN contact_mappings cm
-      ON cm.client_id = messages.client_id AND cm.chat_id = messages.chat_id
+      ON cm.client_id = messages.client_id
+      AND (
+        cm.chat_id = messages.chat_id
+        OR stripChatIdServer(cm.chat_id) = stripChatIdServer(messages.chat_id)
+      )
     WHERE ${where.join(" AND ")}
     GROUP BY messages.client_id, COALESCE(cm.phone, messages.chat_id)
     ORDER BY last_message_at DESC

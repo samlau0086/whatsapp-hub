@@ -7,6 +7,7 @@ import {
   listQueuedTasksForClient,
   listOnlineClients,
   listWebhooks,
+  resolveChatIdForPhone,
   setClientStatus,
   touchClient,
   updateTask,
@@ -115,12 +116,13 @@ export function createHub(httpServer) {
         completedAt: new Date().toISOString()
       });
       if (payload.ok && task.type === "send-message") {
+        const mappedContact = resolveChatIdForPhone({ phone: task.target_phone, clientId: task.client_id });
         const message = createMessage({
           id: `task-${task.id}`,
           externalId: payload.result?.messageId || null,
           clientId: task.client_id,
           direction: "outbound",
-          chatId: payload.result?.chatId || null,
+          chatId: mappedContact?.chat_id || payload.result?.chatId || null,
           sender: task.client_id,
           recipient: task.target_phone,
           body: task.payload?.body || "",
@@ -128,6 +130,8 @@ export function createHub(httpServer) {
           payload: {
             taskId: task.id,
             result: payload.result || null,
+            recipientPhone: task.target_phone,
+            contact: mappedContact?.contact_payload || null,
             metadata: task.payload?.metadata || {}
           }
         });
