@@ -75,8 +75,21 @@ export function createHub(httpServer) {
       if (!id) return ack?.({ ok: false, error: "client id required" });
       const status = payload.status || "online";
       if (status !== "online") socketsByClient.delete(id);
-      const client = status === "online" ? touchClient(id, status) : setClientStatus(id, status);
-      io.emit("client:updated", client);
+      if (status === "online") {
+        socket.data.clientId = id;
+        socketsByClient.set(id, socket.id);
+      }
+      let client = status === "online" ? touchClient(id, status) : setClientStatus(id, status);
+      if (!client && status === "online") {
+        client = upsertClient({
+          id,
+          name: payload.name || id,
+          phone: payload.phone || null,
+          metadata: payload.metadata || {},
+          status: "online"
+        });
+      }
+      if (client) io.emit("client:updated", client);
       ack?.({ ok: true, client });
     });
 

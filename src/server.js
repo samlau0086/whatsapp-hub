@@ -72,7 +72,7 @@ if (config.trustProxy) {
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 app.use((req, res, next) => {
-  if (["/", "/login", "/app.js", "/styles.css"].includes(req.path)) {
+  if (["/", "/login", "/app.js", "/styles.css"].includes(req.path) || req.path.startsWith("/admin/api/") || req.path.startsWith("/api/")) {
     res.setHeader("Cache-Control", "no-store");
   }
   next();

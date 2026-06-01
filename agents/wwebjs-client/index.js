@@ -81,11 +81,21 @@ function emitHello(status = "online") {
       platform: "whatsapp-web.js",
       pushname: whatsapp.info?.pushname || null
     }
+  }, (response) => {
+    if (!response?.ok) {
+      console.error(`Hub rejected client hello: ${response?.error || "unknown error"}`);
+    } else {
+      console.log(`Hub registered client ${config.clientId} as ${response.client?.status || status}`);
+    }
   });
 }
 
 socket.on("connect", () => {
   emitHello();
+});
+
+socket.on("connect_error", (error) => {
+  console.error(`Hub socket connection failed: ${error.message}`);
 });
 
 socket.on("task:send-message", async (task, ack) => {
@@ -133,7 +143,16 @@ async function downloadMedia(mediaPayload) {
 
 setInterval(() => {
   if (socket.connected) {
-    socket.emit("client:heartbeat", { id: config.clientId, status: "online" });
+    socket.emit("client:heartbeat", {
+      id: config.clientId,
+      name: config.clientName,
+      phone: whatsapp.info?.wid?.user || null,
+      status: "online",
+      metadata: {
+        platform: "whatsapp-web.js",
+        pushname: whatsapp.info?.pushname || null
+      }
+    });
   }
 }, 15_000).unref();
 

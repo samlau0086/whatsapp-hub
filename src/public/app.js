@@ -16,6 +16,7 @@ const state = {
   deploymentTab: "env",
   editingClientConfigId: "",
   socket: null,
+  refreshTimer: null,
   clientFilter: "all",
   selectedClientId: "",
   selectedChatId: ""
@@ -155,6 +156,7 @@ function t(key, values = {}) {
 function api(path, options = {}) {
   return fetch(path, {
     ...options,
+    cache: "no-store",
     credentials: "same-origin",
     headers: {
       "content-type": "application/json",
@@ -631,17 +633,48 @@ async function load() {
   setConnectionLabel(t("connected"));
   render();
   connectSocket();
+  scheduleStateRefresh();
+}
+
+async function refreshHubState() {
+  const [clients, tasks, messages, chats, requests, clientConfigs] = await Promise.all([
+    can("clients:read") ? api("/admin/api/clients") : Promise.resolve({ clients: [] }),
+    can("tasks:read") ? api("/admin/api/tasks?limit=50") : Promise.resolve({ tasks: [] }),
+    can("messages:read") ? api("/admin/api/messages?limit=50") : Promise.resolve({ messages: [] }),
+    can("messages:read") && state.selectedClientId ? api(`/admin/api/chats?clientId=${encodeURIComponent(state.selectedClientId)}&limit=100`) : Promise.resolve({ chats: [] }),
+    can("requests:read") ? api("/admin/api/requests?limit=50") : Promise.resolve({ requests: [] }),
+    can("clients:read") ? api("/admin/api/client-configs") : Promise.resolve({ clientConfigs: [] })
+  ]);
+  state.clients = clients.clients;
+  state.tasks = tasks.tasks;
+  state.messages = messages.messages;
+  state.chats = chats.chats;
+  state.apiRequests = requests.requests;
+  state.clientConfigs = clientConfigs.clientConfigs;
+  render();
+}
+
+function scheduleStateRefresh() {
+  if (state.refreshTimer) return;
+  state.refreshTimer = window.setInterval(() => {
+    if (document.visibilityState === "visible") {
+      refreshHubState().catch(() => {});
+    }
+  }, 10_000);
 }
 
 function connectSocket() {
   if (state.socket?.connected) return;
   state.socket?.disconnect();
   state.socket = io({ withCredentials: true });
-  state.socket.on("connect", () => setConnectionLabel(t("connected")));
+  state.socket.on("connect", () => {
+    setConnectionLabel(t("connected"));
+    refreshHubState().catch((error) => showToast(error.message));
+  });
   state.socket.on("disconnect", () => setConnectionLabel(t("connectionFailed")));
   state.socket.on("connect_error", () => setConnectionLabel(t("connectionFailed")));
   state.socket.on("client:updated", (client) => {
-    if (!can("clients:read")) return;
+    if (!can("clients:read") || !client?.id) return;
     state.clients = [client, ...state.clients.filter((item) => item.id !== client.id)];
     render();
   });
@@ -927,7 +960,7 @@ function bindEvents() {
   });
 
   $("refresh").addEventListener("click", () => {
-    load()
+    refreshHubState()
       .then(() => showToast(t("hubRefreshed")))
       .catch((error) => showToast(error.message));
   });
@@ -1114,6 +1147,11 @@ bindEvents();
 applyLanguage();
 applyTheme();
 render();
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && state.user) {
+    refreshHubState().catch(() => {});
+  }
+});
 load().catch((error) => {
   setConnectionLabel(t("connectionFailed"));
   showToast(error.message);
