@@ -402,18 +402,144 @@ curl -X POST https://ws.example.com/api/tasks/send-message \
 
 ### 第 14 步：以后如何更新 Hub
 
-如果代码有更新，在 VPS 上执行：
+如果你已经部署成功，后续更新通常有两种方式：推荐使用 GitHub Actions 自动更新；如果临时需要，也可以 SSH 到 VPS 手动更新。
+
+#### 方式 A：通过 GitHub Actions 自动更新（推荐）
+
+在你自己的电脑上修改好代码后，执行：
+
+```bash
+git status
+git add .
+git commit -m "Update whatsapp hub"
+git push
+```
+
+推送到 GitHub 后，打开你的 GitHub 仓库：
+
+```text
+Actions -> 最新一次 workflow -> 等待绿色成功
+```
+
+Actions 成功后，它会自动完成这些事情：
+
+1. 打包当前项目代码。
+2. 通过 SSH 上传到 VPS。
+3. 在 VPS 部署目录写入 `hub.env`。
+4. 执行 Docker Compose 重新构建并启动容器。
+
+如果你新增或修改了环境变量，需要同时更新 GitHub 仓库的 Secret：
+
+```text
+Settings -> Secrets and variables -> Actions -> Repository secrets -> VPS_ENV_FILE
+```
+
+`VPS_ENV_FILE` 里面应该保存完整生产环境配置，例如：
+
+```bash
+PORT=3000
+DATABASE_PATH=./data/hub.sqlite
+UPLOAD_DIR=./data/uploads
+HUB_API_TOKEN='请换成很长的随机字符串'
+WEB_ADMIN_USERNAME=admin
+WEB_ADMIN_PASSWORD=请换成后台管理员密码
+PUBLIC_BASE_URL=https://ws.example.com
+TRUST_PROXY=true
+HOST_BIND_ADDRESS=127.0.0.1
+HOST_PORT=3000
+CLIENT_OFFLINE_AFTER_MS=45000
+```
+
+注意：如果 `HUB_API_TOKEN` 里面包含 `$`，建议用英文单引号包起来，例如：
+
+```bash
+HUB_API_TOKEN='abc$123'
+```
+
+否则 Docker Compose 可能会把 `$123` 当成变量，导致 token 被改坏。
+
+#### 方式 B：SSH 到 VPS 手动更新
+
+如果代码有更新，也可以在 VPS 上执行：
 
 ```bash
 cd /opt/whatsapp-hub
 git pull
-docker compose up -d --build
+docker compose --env-file hub.env up -d --build
 ```
 
 查看日志：
 
 ```bash
-docker compose logs -f
+docker compose --env-file hub.env logs -f
+```
+
+这里必须带上 `--env-file hub.env`。如果不带，`HOST_PORT`、`HOST_BIND_ADDRESS`、`PORT` 这些用于端口映射的变量可能不会按 `hub.env` 生效。
+
+例如你在 `hub.env` 里写的是：
+
+```bash
+PORT=3000
+HOST_BIND_ADDRESS=127.0.0.1
+HOST_PORT=3011
+```
+
+那么正确的容器端口映射应该类似：
+
+```text
+127.0.0.1:3011->3000
+```
+
+如果你发现仍然是：
+
+```text
+127.0.0.1:3000->3000
+```
+
+说明很可能启动时没有带 `--env-file hub.env`，请执行：
+
+```bash
+cd /opt/whatsapp-hub
+docker compose down
+docker compose --env-file hub.env up -d --build
+```
+
+#### 更新后检查
+
+检查容器：
+
+```bash
+cd /opt/whatsapp-hub
+docker compose --env-file hub.env ps
+```
+
+查看最近日志：
+
+```bash
+docker compose --env-file hub.env logs --tail=100
+```
+
+如果你修改了 `HOST_PORT`，还需要检查 Nginx 的 `proxy_pass` 是否指向同一个端口。
+
+例如 `HOST_PORT=3011` 时，Nginx 应该是：
+
+```nginx
+location / {
+  proxy_pass http://127.0.0.1:3011;
+  proxy_http_version 1.1;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+}
+```
+
+修改 Nginx 后执行：
+
+```bash
+nginx -t
+systemctl reload nginx
 ```
 
 更新不会删除数据库，因为 `docker-compose.yml` 已经把数据目录挂载到：
