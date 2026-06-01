@@ -1232,63 +1232,63 @@ curl -H "x-hub-token: replace-with-the-same-value-as-HUB_API_TOKEN" https://ws.g
 
 ## API
 
-所有 `/api/*` 请求都面向外部业务系统和 WhatsApp client agent，需要携带：
+所有外部业务接口都在 `/api/*` 下。请求需要携带 API token，任选一种方式：
 
 ```http
 x-hub-token: replace-with-a-long-random-token
 ```
 
-示例中的域名请替换为你的 Hub 地址，例如 `https://ws.geekmt.com`。
+```http
+Authorization: Bearer replace-with-a-long-random-token
+```
 
-### 创建发送任务
+示例域名请替换为你的 Hub 地址，例如 `https://ws.geekmt.com`。
 
-请求：
+### 认证检查
+
+```bash
+curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/api/auth/check
+```
+
+```json
+{
+  "ok": true,
+  "token": {
+    "id": "tok_123",
+    "name": "crm",
+    "permissions": ["clients:read", "messages:read", "tasks:send"],
+    "is_env_token": false
+  }
+}
+```
+
+### 发送文本消息
+
+外部业务系统推荐始终使用手机号作为 `to`。Hub 会自动查找 `phone -> chatId` 映射；如果已知真实 WhatsApp 会话 ID，例如 `88399604142300@lid`，Hub 会在内部用该 `chatId` 发送，但任务和外部业务仍以手机号为主。
 
 ```bash
 curl -X POST https://hub.example.com/api/tasks/send-message \
   -H "content-type: application/json" \
   -H "x-hub-token: replace-with-a-long-random-token" \
-  -d "{\"to\":\"15551234567\",\"body\":\"hello from hub\",\"metadata\":{\"source\":\"crm\"}}"
+  -d "{\"clientId\":\"office-pc-01\",\"to\":\"447856364969\",\"body\":\"hello from crm\",\"metadata\":{\"source\":\"crm\"}}"
 ```
+
+请求体字段：
+
+- `to`: 目标手机号，推荐必填，例如 `447856364969`。
+- `clientId`: 可选。没有历史映射时使用该 client；不传则随机选择在线 client。
+- `chatId`: 可选。只作为实际 WhatsApp 路由使用，不建议外部业务系统依赖它。
+- `body`: 文本内容。
+- `media`: 可选，发送媒体时使用。
+- `metadata`: 可选，业务侧自定义数据。
 
 调度规则：
 
-- 如果目标手机号之前已有成功的 outbound 发送记录，优先使用上次给该手机号发送消息的 client。
-- 如果该历史 client 当前离线，任务会保持 `queued`，等该 client 上线后自动发送。
-- 如果没有历史 client，才使用请求里的 `clientId`。
-- 如果没有历史 client 且没有传 `clientId`，随机选择一个在线 client。
-- Web 后台或 API 可以手动把 queued 任务改派给其他 client。
-
-```json
-{
-  "clientId": "office-pc-01",
-  "to": "15551234567",
-  "body": "hello from hub",
-  "metadata": {
-    "source": "crm"
-  }
-}
-```
-
-字段说明：
-
-- `to`: 普通发送时填写目标手机号，例如 `447856364969`。Hub 会交给 agent 转成 WhatsApp 的 `447856364969@c.us`。
-- `chatId`: 回复某条已收到消息时建议填写原始 `chat_id`，例如 `88399604142300@lid`、`447856364969@c.us`。如果传了 `chatId`，agent 会优先按这个原始会话 ID 回复，不会把它当手机号重新转换。
-- Web 后台集中聊天界面会自动使用当前会话的 `chatId` 回复，适合处理 WhatsApp 返回的内部 ID 和真实手机号不一致的情况。
-
-Hub 会自动维护手机号到真实 WhatsApp `chatId` 的映射。外部业务系统通常只需要继续传手机号：
-
-```json
-{
-  "clientId": "office-pc-01",
-  "to": "447856364969",
-  "body": "hello from crm"
-}
-```
-
-如果 Hub 已经从历史消息或联系人解析中知道 `447856364969` 对应 `88399604142300@lid`，发送任务会自动改用这个真实 `chatId`，外部系统不需要处理 `@lid`。
-
-如果你从消息历史里取到的发件人看起来不像真实手机号，例如 `88399604142300`，不要把它当手机号手动发送。应该让 Hub 先通过联系人解析接口建立映射，之后业务系统继续使用真实手机号。
+- 如果手机号已有 `contact_mappings` 映射，Hub 会使用映射里的 `chat_id` 发送。
+- 如果此手机号之前由某个 client 发过消息，优先使用该 client。
+- 如果历史 client 离线，任务保持 `queued`，等该 client 上线后发送。
+- 如果没有历史 client，使用请求里的 `clientId`。
+- 如果没有历史 client 且没有传 `clientId`，随机选择在线 client。
 
 响应 `202 Accepted`：
 
@@ -1299,47 +1299,26 @@ Hub 会自动维护手机号到真实 WhatsApp `chatId` 的映射。外部业务
     "type": "send-message",
     "status": "running",
     "client_id": "office-pc-01",
-    "target_phone": "15551234567",
+    "target_phone": "447856364969",
     "payload": {
-      "to": "15551234567",
-      "body": "hello from hub",
+      "to": "447856364969",
+      "chatId": "88399604142300@lid",
+      "body": "hello from crm",
+      "media": null,
       "metadata": {
         "source": "crm"
+      },
+      "routing": {
+        "reason": "mapped-phone-chat",
+        "requestedClientId": "office-pc-01",
+        "stickyClientId": null,
+        "mappedChatId": "88399604142300@lid"
       }
     },
     "result": null,
     "error": null,
-    "created_at": "2026-05-24T10:00:00.000Z",
-    "updated_at": "2026-05-24T10:00:00.100Z",
-    "completed_at": null
-  }
-}
-```
-
-如果命中历史 client 但该 client 离线，响应里的任务会是 `queued`：
-
-```json
-{
-  "task": {
-    "id": "7a4926da-26bb-4f90-8d1c-3f3ad84b6db4",
-    "type": "send-message",
-    "status": "queued",
-    "client_id": "office-pc-01",
-    "target_phone": "15551234567",
-    "payload": {
-      "to": "15551234567",
-      "body": "hello from hub",
-      "metadata": {},
-      "routing": {
-        "reason": "sticky-target-client",
-        "requestedClientId": null,
-        "stickyClientId": "office-pc-01"
-      }
-    },
-    "result": null,
-    "error": "waiting for client office-pc-01 to come online",
-    "created_at": "2026-05-24T10:00:00.000Z",
-    "updated_at": "2026-05-24T10:00:00.100Z",
+    "created_at": "2026-06-01T10:00:00.000Z",
+    "updated_at": "2026-06-01T10:00:00.100Z",
     "completed_at": null
   }
 }
@@ -1348,14 +1327,16 @@ Hub 会自动维护手机号到真实 WhatsApp `chatId` 的映射。外部业务
 常见错误：
 
 ```json
-{
-  "error": "no online clients available"
-}
+{ "error": "no online clients available" }
+```
+
+```json
+{ "error": "requested client was not found" }
 ```
 
 ### 上传并发送媒体消息
 
-先上传附件。支持图片、视频和普通文件，单文件默认最大 50 MB：
+先上传文件：
 
 ```bash
 curl -X POST https://hub.example.com/api/uploads \
@@ -1378,39 +1359,25 @@ curl -X POST https://hub.example.com/api/uploads \
 }
 ```
 
-然后把响应里的 `file` 放进发送任务的 `media` 字段：
+再把 `file` 放进发送任务的 `media` 字段：
 
 ```bash
 curl -X POST https://hub.example.com/api/tasks/send-message \
   -H "content-type: application/json" \
   -H "x-hub-token: replace-with-a-long-random-token" \
-  -d "{\"to\":\"15551234567\",\"body\":\"please check this file\",\"media\":{\"url\":\"/uploads/f3a1d28db4d94b6b9e9c0f0b4e5a7d23\",\"originalName\":\"invoice.pdf\",\"mimeType\":\"application/pdf\",\"sendAsDocument\":true}}"
+  -d "{\"clientId\":\"office-pc-01\",\"to\":\"447856364969\",\"body\":\"please check this file\",\"media\":{\"url\":\"/uploads/f3a1d28db4d94b6b9e9c0f0b4e5a7d23\",\"originalName\":\"invoice.pdf\",\"mimeType\":\"application/pdf\",\"sendAsDocument\":true}}"
 ```
 
-图片或视频可以不传 `sendAsDocument`，文件建议传 `true`：
+`sendAsDocument=true` 适合 PDF、压缩包、表格等文件；图片和视频可以传 `false` 或省略。
 
-```json
-{
-  "to": "15551234567",
-  "body": "photo caption",
-  "media": {
-    "url": "/uploads/f3a1d28db4d94b6b9e9c0f0b4e5a7d23",
-    "originalName": "photo.jpg",
-    "mimeType": "image/jpeg",
-    "sendAsDocument": false
-  }
-}
-```
-
-### 查询 clients
-
-请求：
+### 查询 Clients
 
 ```bash
 curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/api/clients
+curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/api/clients/office-pc-01
 ```
 
-响应：
+列表响应：
 
 ```json
 {
@@ -1424,141 +1391,165 @@ curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/
         "platform": "whatsapp-web.js",
         "pushname": "Sales"
       },
-      "created_at": "2026-05-24T09:50:00.000Z",
-      "updated_at": "2026-05-24T10:00:15.000Z",
-      "last_seen_at": "2026-05-24T10:00:15.000Z"
+      "created_at": "2026-06-01T09:50:00.000Z",
+      "updated_at": "2026-06-01T10:00:15.000Z",
+      "last_seen_at": "2026-06-01T10:00:15.000Z"
     }
   ]
 }
 ```
 
-查询单个 client：
+### 删除 Client
+
+只删除 client 记录：
 
 ```bash
-curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/api/clients/office-pc-01
+curl -X DELETE -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/api/clients/office-pc-01
 ```
 
-响应：
+删除 client 以及关联配置、任务、消息：
 
-```json
-{
-  "client": {
-    "id": "office-pc-01",
-    "name": "Office PC 01",
-    "phone": "15551234567",
-    "status": "online",
-    "metadata": {
-      "platform": "whatsapp-web.js"
-    },
-    "created_at": "2026-05-24T09:50:00.000Z",
-    "updated_at": "2026-05-24T10:00:15.000Z",
-    "last_seen_at": "2026-05-24T10:00:15.000Z"
-  }
-}
+```bash
+curl -X DELETE -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/api/clients/office-pc-01/data
 ```
 
 ### 查询任务
 
-请求：
-
 ```bash
-curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/api/tasks
+curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/tasks?clientId=office-pc-01&limit=100"
 curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/api/tasks/<task-id>
 ```
 
 支持查询参数：
 
 - `clientId`: 只看某个 client 的任务。
-- `status`: 只看某个状态，例如 `running`、`succeeded`、`failed`。
+- `status`: 只看某个状态，例如 `queued`、`running`、`succeeded`、`failed`。
 - `limit`: 返回数量，最大 500。
 
-列表响应：
+任务状态：
 
-```json
-{
-  "tasks": [
-    {
-      "id": "9c52421c-7c6c-46c6-b88a-25f4d3aa8a52",
-      "type": "send-message",
-      "status": "succeeded",
-      "client_id": "office-pc-01",
-      "target_phone": "15551234567",
-      "payload": {
-        "to": "15551234567",
-        "body": "hello from hub",
-        "metadata": {
-          "source": "crm"
-        }
-      },
-      "result": {
-        "messageId": "true_15551234567@c.us_ABCDEF",
-        "chatId": "15551234567@c.us"
-      },
-      "error": null,
-      "created_at": "2026-05-24T10:00:00.000Z",
-      "updated_at": "2026-05-24T10:00:03.000Z",
-      "completed_at": "2026-05-24T10:00:03.000Z"
-    }
-  ]
-}
+- `queued`: 等待 client 上线或等待派发。
+- `running`: 已下发给 client。
+- `succeeded`: client 返回发送成功。
+- `failed`: client 返回失败或派发超时。
+
+### 手动改派任务
+
+```bash
+curl -X PATCH https://hub.example.com/api/tasks/7a4926da-26bb-4f90-8d1c-3f3ad84b6db4/assign \
+  -H "content-type: application/json" \
+  -H "x-hub-token: replace-with-a-long-random-token" \
+  -d "{\"clientId\":\"backup-pc-01\"}"
 ```
 
-单条响应：
+响应：
 
 ```json
 {
   "task": {
-    "id": "9c52421c-7c6c-46c6-b88a-25f4d3aa8a52",
+    "id": "7a4926da-26bb-4f90-8d1c-3f3ad84b6db4",
     "type": "send-message",
-    "status": "succeeded",
-    "client_id": "office-pc-01",
-    "target_phone": "15551234567",
+    "status": "running",
+    "client_id": "backup-pc-01",
+    "target_phone": "447856364969",
     "payload": {
-      "to": "15551234567",
-      "body": "hello from hub",
-      "metadata": {}
-    },
-    "result": {
-      "messageId": "true_15551234567@c.us_ABCDEF",
-      "chatId": "15551234567@c.us"
-    },
-    "error": null,
-    "created_at": "2026-05-24T10:00:00.000Z",
-    "updated_at": "2026-05-24T10:00:03.000Z",
-    "completed_at": "2026-05-24T10:00:03.000Z"
+      "to": "447856364969",
+      "body": "hello"
+    }
   }
 }
 ```
 
 ### 查询消息
 
-请求：
-
 ```bash
 curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/messages?clientId=office-pc-01&limit=100"
-curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/messages?targetPhone=15551234567&limit=100"
+curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/messages?targetPhone=447856364969&limit=100"
+curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/messages?chatId=88399604142300@lid&limit=100"
 curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/clients/office-pc-01/messages"
 ```
 
 支持查询参数：
 
 - `clientId`: client ID。
-- `targetPhone`: 目标手机号，会匹配 `sender`、`recipient` 和 `chat_id`。
+- `targetPhone`: 目标手机号。会匹配 `contact_mappings`、`sender`、`recipient`、`chat_id`。
 - `sender`: 发件人。
-- `chatId`: WhatsApp chat ID。
+- `chatId`: 原始 WhatsApp chat ID。
 - `limit`: 返回数量，最大 500。
 
 消息响应会优先返回手机号语义字段：
 
-- `contact_phone`: Hub 已解析到的真实手机号。
-- `conversation_key`: 优先等于 `contact_phone`；如果无法解析手机号，才回退为 `chat_id`。
+- `contact_phone`: Hub 已解析或手动绑定的真实手机号。
+- `conversation_key`: 优先等于 `contact_phone`；没有手机号时才回退为 `chat_id`。
+- `conversation_id`: 与 `conversation_key` 相同，方便外部系统使用。
 - `raw_chat_id`: 原始 WhatsApp chat ID，例如 `88399604142300@lid`。
 
-外部业务系统建议优先使用 `conversation_key` 或 `contact_phone`。只有这两个字段为空时，再使用 `raw_chat_id`。
+响应示例：
 
-### 解析 chatId 对应联系人
+```json
+{
+  "messages": [
+    {
+      "id": "8f2fd5ed-0928-4ef9-9f57-57cb7fb359d1",
+      "external_id": "false_88399604142300@lid_123456",
+      "client_id": "office-pc-01",
+      "direction": "inbound",
+      "chat_id": "88399604142300@lid",
+      "raw_chat_id": "88399604142300@lid",
+      "contact_phone": "447856364969",
+      "conversation_key": "447856364969",
+      "conversation_id": "447856364969",
+      "sender": "447856364969",
+      "recipient": "8618682188709@c.us",
+      "body": "hi",
+      "message_type": "chat",
+      "payload": {
+        "senderPhone": "447856364969",
+        "contact": {
+          "id": "88399604142300@lid",
+          "number": "447856364969"
+        }
+      },
+      "created_at": "2026-06-01T10:02:00.000Z",
+      "received_at": "2026-06-01T10:02:01.000Z"
+    }
+  ]
+}
+```
 
-如果 WhatsApp 返回的会话 ID 不是普通手机号，例如 `88399604142300@lid` 或你看到的 `88399604142300`，可以让在线 client 通过 WhatsApp Web 查询联系人信息：
+外部业务系统建议优先使用 `contact_phone` 或 `conversation_key`；只有它们为空时再使用 `raw_chat_id`。
+
+### 查询会话列表
+
+```bash
+curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/chats?clientId=office-pc-01&limit=100"
+```
+
+响应示例：
+
+```json
+{
+  "chats": [
+    {
+      "conversation_id": "447856364969",
+      "conversation_key": "447856364969",
+      "contact_phone": "447856364969",
+      "chat_id": "88399604142300@lid",
+      "client_id": "office-pc-01",
+      "last_message_at": "2026-06-01T10:05:00.000Z",
+      "message_count": 12,
+      "last_body": "hello",
+      "last_sender": "office-pc-01"
+    }
+  ]
+}
+```
+
+Hub 会尽量把 `@lid`、`@c.us` 或无后缀的同一数字会话合并到手机号会话下。若没有手机号映射，`conversation_key` 会回退为原始 `chat_id`。
+
+### 解析 ChatId 对应联系人
+
+当 WhatsApp 返回的会话 ID 不是手机号，例如 `88399604142300@lid`，可以让在线 client 通过 WhatsApp Web 查询联系人信息：
 
 ```bash
 curl -H "x-hub-token: replace-with-a-long-random-token" \
@@ -1580,22 +1571,25 @@ curl -H "x-hub-token: replace-with-a-long-random-token" \
     "isBusiness": false,
     "isMyContact": true,
     "isWAContact": true
+  },
+  "mapping": {
+    "phone": "447856364969",
+    "client_id": "office-pc-01",
+    "chat_id": "88399604142300@lid"
   }
 }
 ```
 
-注意：`number` 是否存在取决于 WhatsApp Web 当前是否向这个登录账号暴露真实手机号。如果 WhatsApp 只返回内部 ID，Hub 也无法强行反查真实手机号。新收到的消息会尽量把 `contact.number` 保存到消息 payload 里。
+注意：`number` 是否存在取决于 WhatsApp Web 当前是否向该登录账号暴露真实手机号。如果 WhatsApp 只返回内部 ID，Hub 无法强行反查真实手机号。
 
-### 按手机号查询 Hub 内部映射
-
-当 Hub 已经知道某个手机号对应的真实 `chatId` 后，可以通过手机号查询映射：
+### 查询手机号映射
 
 ```bash
 curl -H "x-hub-token: replace-with-a-long-random-token" \
   "https://hub.example.com/api/contacts/resolve?phone=447856364969&clientId=office-pc-01"
 ```
 
-响应示例：
+响应：
 
 ```json
 {
@@ -1611,11 +1605,35 @@ curl -H "x-hub-token: replace-with-a-long-random-token" \
 }
 ```
 
-`clientId` 可以省略；省略时返回最近一次看到该手机号的映射。
+`clientId` 可省略；省略时返回最近一次看到该手机号的映射。
+
+也可以查询映射列表：
+
+```bash
+curl -H "x-hub-token: replace-with-a-long-random-token" \
+  "https://hub.example.com/api/contact-mappings?phone=447856364969"
+```
+
+```json
+{
+  "mappings": [
+    {
+      "phone": "447856364969",
+      "client_id": "office-pc-01",
+      "chat_id": "88399604142300@lid",
+      "contact_payload": {
+        "number": "447856364969",
+        "id": "88399604142300@lid",
+        "source": "manual"
+      }
+    }
+  ]
+}
+```
 
 ### 手动创建或更新手机号映射
 
-如果 WhatsApp Web 无法自动解析真实手机号，可以手动告诉 Hub：
+当 WhatsApp Web 无法自动解析手机号，或者你想手动纠正映射，可以调用：
 
 ```bash
 curl -X PUT https://hub.example.com/api/contact-mappings \
@@ -1624,7 +1642,7 @@ curl -X PUT https://hub.example.com/api/contact-mappings \
   -d "{\"clientId\":\"office-pc-01\",\"phone\":\"447856364969\",\"chatId\":\"88399604142300@lid\"}"
 ```
 
-响应示例：
+响应：
 
 ```json
 {
@@ -1641,91 +1659,11 @@ curl -X PUT https://hub.example.com/api/contact-mappings \
 }
 ```
 
-更新过映射后，后续这些请求都可以基于手机号：
+更新映射后，后续发送、查询消息、查询会话列表都可以继续基于手机号，而不需要业务系统保存 `chatId`。
 
-```bash
-curl -H "x-hub-token: replace-with-a-long-random-token" \
-  "https://hub.example.com/api/messages?targetPhone=447856364969"
-
-curl -X POST https://hub.example.com/api/tasks/send-message \
-  -H "content-type: application/json" \
-  -H "x-hub-token: replace-with-a-long-random-token" \
-  -d "{\"clientId\":\"office-pc-01\",\"to\":\"447856364969\",\"body\":\"hello\"}"
-```
-
-查询已有映射：
-
-```bash
-curl -H "x-hub-token: replace-with-a-long-random-token" \
-  "https://hub.example.com/api/contact-mappings?phone=447856364969"
-```
-
-响应：
-
-```json
-{
-  "messages": [
-    {
-      "id": "8f2fd5ed-0928-4ef9-9f57-57cb7fb359d1",
-      "external_id": "false_15557654321@c.us_123456",
-      "client_id": "office-pc-01",
-      "direction": "inbound",
-      "chat_id": "15557654321@c.us",
-      "sender": "15557654321@c.us",
-      "recipient": "15551234567@c.us",
-      "body": "hi",
-      "message_type": "chat",
-      "payload": {
-        "from": "15557654321@c.us",
-        "to": "15551234567@c.us",
-        "hasMedia": false,
-        "type": "chat"
-      },
-      "created_at": "2026-05-24T10:02:00.000Z",
-      "received_at": "2026-05-24T10:02:01.000Z"
-    }
-  ]
-}
-```
-
-### 手动改派任务
-
-请求：
-
-```bash
-curl -X PATCH https://hub.example.com/api/tasks/7a4926da-26bb-4f90-8d1c-3f3ad84b6db4/assign \
-  -H "content-type: application/json" \
-  -H "x-hub-token: replace-with-a-long-random-token" \
-  -d "{\"clientId\":\"backup-pc-01\"}"
-```
-
-响应：
-
-```json
-{
-  "task": {
-    "id": "7a4926da-26bb-4f90-8d1c-3f3ad84b6db4",
-    "type": "send-message",
-    "status": "running",
-    "client_id": "backup-pc-01",
-    "target_phone": "15551234567",
-    "payload": {
-      "to": "15551234567",
-      "body": "hello from hub",
-      "metadata": {}
-    },
-    "result": null,
-    "error": null,
-    "created_at": "2026-05-24T10:00:00.000Z",
-    "updated_at": "2026-05-24T10:03:00.000Z",
-    "completed_at": null
-  }
-}
-```
+Web 后台也支持手动更新：进入集中聊天，选择会话后双击聊天窗口上方标题，输入手机号，点 `OK` 即可保存映射。
 
 ### 查询 API 请求记录
-
-请求：
 
 ```bash
 curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com/api/requests?limit=100"
@@ -1745,19 +1683,19 @@ curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com
       "client_ip": "203.0.113.10",
       "user_agent": "curl/8.0.1",
       "request_body": {
-        "to": "15551234567",
-        "body": "hello from hub"
+        "to": "447856364969",
+        "body": "hello"
       },
       "response_time_ms": 18,
-      "created_at": "2026-05-24T10:00:00.000Z"
+      "created_at": "2026-06-01T10:00:00.000Z"
     }
   ]
 }
 ```
 
-### 注册 webhook
+### Webhooks
 
-请求：
+注册 webhook：
 
 ```bash
 curl -X POST https://hub.example.com/api/webhooks \
@@ -1766,22 +1704,23 @@ curl -X POST https://hub.example.com/api/webhooks \
   -d "{\"url\":\"https://example.com/whatsapp-events\",\"events\":[\"message.created\",\"task.updated\"],\"secret\":\"shared-secret\"}"
 ```
 
-响应：
+删除 webhook：
+
+```bash
+curl -X DELETE -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/api/webhooks/<webhook-id>
+```
+
+事件 payload：
 
 ```json
 {
-  "webhook": {
-    "id": "5b9c2e53-94d4-4477-9f4d-f68765478204",
-    "url": "https://example.com/whatsapp-events",
-    "events": [
-      "message.created",
-      "task.updated"
-    ],
-    "secret": "shared-secret",
-    "enabled": true,
-    "created_at": "2026-05-24T10:05:00.000Z",
-    "updated_at": "2026-05-24T10:05:00.000Z"
-  }
+  "event": "message.created",
+  "data": {
+    "client_id": "office-pc-01",
+    "conversation_key": "447856364969",
+    "body": "hello"
+  },
+  "sentAt": "2026-06-01T10:05:00.000Z"
 }
 ```
 
