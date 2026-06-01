@@ -37,26 +37,30 @@ import {
   getTask,
   getUser,
   findLastOutboundClientForTarget,
+  findLastClientForPhone,
   listApiRequests,
   listApiTokens,
   listClientConfigs,
   listClients,
   listChats,
+  listContactMappings,
   listMessages,
   listTasks,
   listUsers,
   listWebhooks,
   purgeClientData,
   removeClient,
+  resolveChatIdForPhone,
   revokeApiToken,
   setClientStatus,
   touchApiToken,
   updateApiToken,
   updateClientConfig,
   updateClientConfigAgentToken,
-  updateUser
+  updateUser,
+  upsertContactMapping
 } from "./db.js";
-import { chooseClient, createHub, emitClientDeleted, forgetClientSocket, reconcileClientPresence } from "./hub.js";
+import { chooseClient, createHub, emitClientDeleted, forgetClientSocket, reconcileClientPresence, resolveContactForClient } from "./hub.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -240,6 +244,43 @@ app.get("/admin/api/chats", requireWebSession, requirePermission("messages:read"
 
 app.get("/admin/api/clients/:id/messages", requireWebSession, requirePermission("messages:read"), (req, res) => {
   res.json({ messages: listMessages({ clientId: req.params.id, limit: req.query.limit }) });
+});
+
+app.get("/admin/api/clients/:id/contact", requireWebSession, requirePermission("messages:read"), async (req, res) => {
+  const chatId = req.query.chatId || req.query.id || req.query.to;
+  if (!chatId) return res.status(400).json({ error: "chatId is required" });
+  const result = await resolveContactForClient(req.params.id, chatId);
+  if (!result?.ok) return res.status(409).json({ error: result?.error || "failed to resolve contact" });
+  const mapping = result.contact?.number ? upsertContactMapping({
+    phone: result.contact.number,
+    clientId: req.params.id,
+    chatId: result.chatId,
+    contact: result.contact
+  }) : null;
+  res.json({ contact: result.contact, chatId: result.chatId, mapping });
+});
+
+app.get("/admin/api/contacts/resolve", requireWebSession, requirePermission("messages:read"), (req, res) => {
+  const phone = req.query.phone || req.query.to;
+  if (!phone) return res.status(400).json({ error: "phone is required" });
+  const mapping = resolveChatIdForPhone({ phone, clientId: req.query.clientId });
+  if (!mapping) return res.status(404).json({ error: "phone mapping not found" });
+  res.json({ mapping });
+});
+
+app.get("/admin/api/contact-mappings", requireWebSession, requirePermission("messages:read"), (req, res) => {
+  res.json({
+    mappings: listContactMappings({
+      clientId: req.query.clientId,
+      phone: req.query.phone,
+      limit: req.query.limit
+    })
+  });
+});
+
+app.put("/admin/api/contact-mappings", requireWebSession, requirePermission("messages:read"), (req, res) => {
+  const mapping = saveContactMapping(req, res);
+  if (mapping) res.json({ mapping });
 });
 
 app.get("/admin/api/tasks", requireWebSession, requirePermission("tasks:read"), (req, res) => {
@@ -440,6 +481,47 @@ app.get("/api/clients/:id/messages", (req, res) => {
   res.json({ messages: listMessages({ clientId: req.params.id, limit: req.query.limit }) });
 });
 
+app.get("/api/clients/:id/contact", async (req, res) => {
+  if (!hasApiPermission(req, "messages:read")) return res.status(403).json({ error: "forbidden" });
+  const chatId = req.query.chatId || req.query.id || req.query.to;
+  if (!chatId) return res.status(400).json({ error: "chatId is required" });
+  const result = await resolveContactForClient(req.params.id, chatId);
+  if (!result?.ok) return res.status(409).json({ error: result?.error || "failed to resolve contact" });
+  const mapping = result.contact?.number ? upsertContactMapping({
+    phone: result.contact.number,
+    clientId: req.params.id,
+    chatId: result.chatId,
+    contact: result.contact
+  }) : null;
+  res.json({ contact: result.contact, chatId: result.chatId, mapping });
+});
+
+app.get("/api/contacts/resolve", (req, res) => {
+  if (!hasApiPermission(req, "messages:read")) return res.status(403).json({ error: "forbidden" });
+  const phone = req.query.phone || req.query.to;
+  if (!phone) return res.status(400).json({ error: "phone is required" });
+  const mapping = resolveChatIdForPhone({ phone, clientId: req.query.clientId });
+  if (!mapping) return res.status(404).json({ error: "phone mapping not found" });
+  res.json({ mapping });
+});
+
+app.get("/api/contact-mappings", (req, res) => {
+  if (!hasApiPermission(req, "messages:read")) return res.status(403).json({ error: "forbidden" });
+  res.json({
+    mappings: listContactMappings({
+      clientId: req.query.clientId,
+      phone: req.query.phone,
+      limit: req.query.limit
+    })
+  });
+});
+
+app.put("/api/contact-mappings", (req, res) => {
+  if (!hasApiPermission(req, "messages:read")) return res.status(403).json({ error: "forbidden" });
+  const mapping = saveContactMapping(req, res);
+  if (mapping) res.json({ mapping });
+});
+
 app.get("/api/messages", (req, res) => {
   if (!hasApiPermission(req, "messages:read")) return res.status(403).json({ error: "forbidden" });
   res.json({
@@ -579,6 +661,34 @@ function publicClientConfig(clientConfig) {
     created_at: clientConfig.created_at,
     updated_at: clientConfig.updated_at
   };
+}
+
+function saveContactMapping(req, res) {
+  const { phone, clientId, chatId, contact } = req.body || {};
+  if (!phone || !clientId || !chatId) {
+    res.status(400).json({ error: "phone, clientId, and chatId are required" });
+    return null;
+  }
+  if (!getClient(clientId)) {
+    res.status(404).json({ error: "client not found" });
+    return null;
+  }
+  const mapping = upsertContactMapping({
+    phone,
+    clientId,
+    chatId,
+    contact: {
+      ...(contact || {}),
+      number: String(phone).replace(/\D/g, ""),
+      id: chatId,
+      source: contact?.source || "manual"
+    }
+  });
+  if (!mapping) {
+    res.status(400).json({ error: "invalid phone or chatId" });
+    return null;
+  }
+  return mapping;
 }
 
 function editableClientConfig(clientConfig) {
@@ -935,33 +1045,39 @@ function powershellEncodedWriteEnv(env) {
 }
 
 async function createAndDispatchMessageTask(req, res) {
-  const { clientId, to, body, metadata, media } = req.body || {};
-  if (!to || (!body && !media)) {
-    res.status(400).json({ error: "to and body or media are required" });
+  const { clientId, to, chatId, body, metadata, media } = req.body || {};
+  const target = chatId || to;
+  if (!target || (!body && !media)) {
+    res.status(400).json({ error: "to/chatId and body or media are required" });
     return null;
   }
 
-  const stickyClientId = findLastOutboundClientForTarget(to);
+  const isChatIdTarget = String(target).includes("@");
+  const stickyClientId = findLastOutboundClientForTarget(target) || (!isChatIdTarget ? findLastClientForPhone(target) : null);
   const stickyClient = stickyClientId ? getClient(stickyClientId) : null;
   const client = stickyClient || (clientId ? getClient(clientId) : chooseClient(null));
   if (!client) {
     res.status(409).json({ error: clientId ? "requested client was not found" : "no online clients available" });
     return null;
   }
+  const mappedContact = !isChatIdTarget ? resolveChatIdForPhone({ phone: target, clientId: client.id }) : null;
+  const resolvedChatId = chatId || mappedContact?.chat_id || null;
 
   const task = createTask({
     type: "send-message",
     clientId: client.id,
-    targetPhone: to,
+    targetPhone: target,
     payload: {
-      to,
+      to: to || target,
+      chatId: resolvedChatId,
       body: body || "",
       media: media || null,
       metadata: metadata || {},
       routing: {
-        reason: stickyClientId ? "sticky-target-client" : (clientId ? "requested-client" : "random-online-client"),
+        reason: mappedContact ? "mapped-phone-chat" : (stickyClientId ? "sticky-target-client" : (clientId ? "requested-client" : "random-online-client")),
         requestedClientId: clientId || null,
-        stickyClientId: stickyClientId || null
+        stickyClientId: stickyClientId || null,
+        mappedChatId: mappedContact?.chat_id || null
       }
     }
   });

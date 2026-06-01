@@ -1270,6 +1270,26 @@ curl -X POST https://hub.example.com/api/tasks/send-message \
 }
 ```
 
+字段说明：
+
+- `to`: 普通发送时填写目标手机号，例如 `447856364969`。Hub 会交给 agent 转成 WhatsApp 的 `447856364969@c.us`。
+- `chatId`: 回复某条已收到消息时建议填写原始 `chat_id`，例如 `88399604142300@lid`、`447856364969@c.us`。如果传了 `chatId`，agent 会优先按这个原始会话 ID 回复，不会把它当手机号重新转换。
+- Web 后台集中聊天界面会自动使用当前会话的 `chatId` 回复，适合处理 WhatsApp 返回的内部 ID 和真实手机号不一致的情况。
+
+Hub 会自动维护手机号到真实 WhatsApp `chatId` 的映射。外部业务系统通常只需要继续传手机号：
+
+```json
+{
+  "clientId": "office-pc-01",
+  "to": "447856364969",
+  "body": "hello from crm"
+}
+```
+
+如果 Hub 已经从历史消息或联系人解析中知道 `447856364969` 对应 `88399604142300@lid`，发送任务会自动改用这个真实 `chatId`，外部系统不需要处理 `@lid`。
+
+如果你从消息历史里取到的发件人看起来不像真实手机号，例如 `88399604142300`，不要把它当手机号手动发送。应该让 Hub 先通过联系人解析接口建立映射，之后业务系统继续使用真实手机号。
+
 响应 `202 Accepted`：
 
 ```json
@@ -1527,6 +1547,118 @@ curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com
 - `sender`: 发件人。
 - `chatId`: WhatsApp chat ID。
 - `limit`: 返回数量，最大 500。
+
+消息响应会优先返回手机号语义字段：
+
+- `contact_phone`: Hub 已解析到的真实手机号。
+- `conversation_key`: 优先等于 `contact_phone`；如果无法解析手机号，才回退为 `chat_id`。
+- `raw_chat_id`: 原始 WhatsApp chat ID，例如 `88399604142300@lid`。
+
+外部业务系统建议优先使用 `conversation_key` 或 `contact_phone`。只有这两个字段为空时，再使用 `raw_chat_id`。
+
+### 解析 chatId 对应联系人
+
+如果 WhatsApp 返回的会话 ID 不是普通手机号，例如 `88399604142300@lid` 或你看到的 `88399604142300`，可以让在线 client 通过 WhatsApp Web 查询联系人信息：
+
+```bash
+curl -H "x-hub-token: replace-with-a-long-random-token" \
+  "https://hub.example.com/api/clients/office-pc-01/contact?chatId=88399604142300@lid"
+```
+
+响应示例：
+
+```json
+{
+  "chatId": "88399604142300@lid",
+  "contact": {
+    "id": "88399604142300@lid",
+    "server": "lid",
+    "user": "88399604142300",
+    "number": "447856364969",
+    "name": "Customer",
+    "pushname": "Customer",
+    "isBusiness": false,
+    "isMyContact": true,
+    "isWAContact": true
+  }
+}
+```
+
+注意：`number` 是否存在取决于 WhatsApp Web 当前是否向这个登录账号暴露真实手机号。如果 WhatsApp 只返回内部 ID，Hub 也无法强行反查真实手机号。新收到的消息会尽量把 `contact.number` 保存到消息 payload 里。
+
+### 按手机号查询 Hub 内部映射
+
+当 Hub 已经知道某个手机号对应的真实 `chatId` 后，可以通过手机号查询映射：
+
+```bash
+curl -H "x-hub-token: replace-with-a-long-random-token" \
+  "https://hub.example.com/api/contacts/resolve?phone=447856364969&clientId=office-pc-01"
+```
+
+响应示例：
+
+```json
+{
+  "mapping": {
+    "phone": "447856364969",
+    "client_id": "office-pc-01",
+    "chat_id": "88399604142300@lid",
+    "contact_payload": {
+      "number": "447856364969",
+      "id": "88399604142300@lid"
+    }
+  }
+}
+```
+
+`clientId` 可以省略；省略时返回最近一次看到该手机号的映射。
+
+### 手动创建或更新手机号映射
+
+如果 WhatsApp Web 无法自动解析真实手机号，可以手动告诉 Hub：
+
+```bash
+curl -X PUT https://hub.example.com/api/contact-mappings \
+  -H "content-type: application/json" \
+  -H "x-hub-token: replace-with-a-long-random-token" \
+  -d "{\"clientId\":\"office-pc-01\",\"phone\":\"447856364969\",\"chatId\":\"88399604142300@lid\"}"
+```
+
+响应示例：
+
+```json
+{
+  "mapping": {
+    "phone": "447856364969",
+    "client_id": "office-pc-01",
+    "chat_id": "88399604142300@lid",
+    "contact_payload": {
+      "number": "447856364969",
+      "id": "88399604142300@lid",
+      "source": "manual"
+    }
+  }
+}
+```
+
+更新过映射后，后续这些请求都可以基于手机号：
+
+```bash
+curl -H "x-hub-token: replace-with-a-long-random-token" \
+  "https://hub.example.com/api/messages?targetPhone=447856364969"
+
+curl -X POST https://hub.example.com/api/tasks/send-message \
+  -H "content-type: application/json" \
+  -H "x-hub-token: replace-with-a-long-random-token" \
+  -d "{\"clientId\":\"office-pc-01\",\"to\":\"447856364969\",\"body\":\"hello\"}"
+```
+
+查询已有映射：
+
+```bash
+curl -H "x-hub-token: replace-with-a-long-random-token" \
+  "https://hub.example.com/api/contact-mappings?phone=447856364969"
+```
 
 响应：
 

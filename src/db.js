@@ -140,6 +140,21 @@ CREATE TABLE IF NOT EXISTS client_configs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_client_configs_client_id ON client_configs(client_id);
+
+CREATE TABLE IF NOT EXISTS contact_mappings (
+  id TEXT PRIMARY KEY,
+  phone TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  contact_payload TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  UNIQUE(client_id, phone)
+);
+
+CREATE INDEX IF NOT EXISTS idx_contact_mappings_phone ON contact_mappings(phone);
+CREATE INDEX IF NOT EXISTS idx_contact_mappings_chat ON contact_mappings(client_id, chat_id);
 `);
 
 ensureColumn("client_configs", "agent_token", "TEXT");
@@ -156,7 +171,20 @@ const parseJson = (value, fallback = {}) => {
 
 const mapClient = (row) => row && ({ ...row, metadata: parseJson(row.metadata) });
 const mapTask = (row) => row && ({ ...row, payload: parseJson(row.payload), result: parseJson(row.result, null) });
-const mapMessage = (row) => row && ({ ...row, payload: parseJson(row.payload) });
+const mapMessage = (row) => {
+  if (!row) return null;
+  const payload = parseJson(row.payload);
+  const contactPhone = row.contact_phone || payload?.senderPhone || payload?.recipientPhone || payload?.contact?.number || null;
+  const conversationKey = contactPhone || row.chat_id || row.sender || row.recipient || null;
+  return {
+    ...row,
+    payload,
+    contact_phone: contactPhone,
+    conversation_id: conversationKey,
+    conversation_key: conversationKey,
+    raw_chat_id: row.chat_id || null
+  };
+};
 const mapWebhook = (row) => row && ({ ...row, events: parseJson(row.events, []), enabled: Boolean(row.enabled) });
 const mapApiRequest = (row) => row && ({ ...row, request_body: parseJson(row.request_body, null) });
 const mapUser = (row) => row && ({ ...row, enabled: Boolean(row.enabled) });
@@ -166,6 +194,7 @@ const mapApiToken = (row) => row && ({
   permissions: parseJson(row.permissions, [])
 });
 const mapClientConfig = (row) => row && ({ ...row, headless: Boolean(row.headless) });
+const mapContactMapping = (row) => row && ({ ...row, contact_payload: parseJson(row.contact_payload, {}) });
 
 seedAdminUser();
 ensureSuperAdminUser();
@@ -466,6 +495,7 @@ export function listQueuedTasksForClient(clientId, limit = 100) {
 
 export function createMessage(message) {
   const timestamp = now();
+  const payload = message.payload || message;
   const row = {
     id: message.id || randomUUID(),
     external_id: message.externalId || null,
@@ -476,7 +506,7 @@ export function createMessage(message) {
     recipient: message.recipient || null,
     body: message.body || "",
     message_type: message.messageType || "text",
-    payload: json(message.payload || message),
+    payload: json(payload),
     created_at: message.createdAt || timestamp,
     received_at: timestamp
   };
@@ -484,6 +514,7 @@ export function createMessage(message) {
     INSERT OR IGNORE INTO messages (id, external_id, client_id, direction, chat_id, sender, recipient, body, message_type, payload, created_at, received_at)
     VALUES (@id, @external_id, @client_id, @direction, @chat_id, @sender, @recipient, @body, @message_type, @payload, @created_at, @received_at)
   `).run(row);
+  upsertContactMappingFromMessage(row, payload);
   return getMessage(row.id);
 }
 
@@ -507,30 +538,50 @@ export function createApiRequest(request) {
 }
 
 export function getMessage(id) {
-  return mapMessage(db.prepare("SELECT * FROM messages WHERE id = ?").get(id));
+  return mapMessage(db.prepare(`
+    SELECT messages.*, cm.phone AS contact_phone
+    FROM messages
+    LEFT JOIN contact_mappings cm
+      ON cm.client_id = messages.client_id AND cm.chat_id = messages.chat_id
+    WHERE messages.id = ?
+  `).get(id));
 }
 
 export function listMessages({ clientId, sender, chatId, targetPhone, limit = 100 } = {}) {
   const where = [];
   const params = {};
   if (clientId) {
-    where.push("client_id = @clientId");
+    where.push("messages.client_id = @clientId");
     params.clientId = clientId;
   }
   if (sender) {
-    where.push("sender = @sender");
+    where.push("messages.sender = @sender");
     params.sender = sender;
   }
   if (chatId) {
-    where.push("chat_id = @chatId");
+    where.push("messages.chat_id = @chatId");
     params.chatId = chatId;
   }
   if (targetPhone) {
-    where.push("(sender LIKE @targetPhoneLike OR recipient LIKE @targetPhoneLike OR chat_id LIKE @targetPhoneLike)");
-    params.targetPhoneLike = `%${normalizePhone(targetPhone)}%`;
+    const phone = normalizePhone(targetPhone);
+    const mappedChatIds = listChatIdsForPhone(phone, clientId);
+    where.push(`(cm.phone = @targetPhone OR messages.sender LIKE @targetPhoneLike OR messages.recipient LIKE @targetPhoneLike OR messages.chat_id LIKE @targetPhoneLike${mappedChatIds.length ? ` OR messages.chat_id IN (${mappedChatIds.map((_, index) => `@mappedChatId${index}`).join(", ")})` : ""})`);
+    params.targetPhone = phone;
+    params.targetPhoneLike = `%${phone}%`;
+    mappedChatIds.forEach((mappedChatId, index) => {
+      params[`mappedChatId${index}`] = mappedChatId;
+    });
   }
   params.limit = Math.min(Number(limit) || 100, 500);
-  const sql = `SELECT * FROM messages ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC LIMIT @limit`;
+  const sql = `
+    SELECT messages.*, cm.phone AS contact_phone
+    FROM messages
+    LEFT JOIN contact_mappings cm
+      ON cm.client_id = messages.client_id AND cm.chat_id = messages.chat_id
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    ORDER BY messages.created_at DESC
+    LIMIT @limit
+  `;
   return db.prepare(sql).all(params).map(mapMessage);
 }
 
@@ -543,30 +594,62 @@ export function listChats({ clientId, limit = 100 } = {}) {
   }
   return db.prepare(`
     SELECT
-      chat_id,
-      client_id,
-      MAX(created_at) AS last_message_at,
+      COALESCE(cm.phone, messages.chat_id) AS conversation_id,
+      COALESCE(cm.phone, messages.chat_id) AS conversation_key,
+      cm.phone AS contact_phone,
+      messages.chat_id,
+      messages.client_id,
+      MAX(messages.created_at) AS last_message_at,
       COUNT(*) AS message_count,
       (
         SELECT body
         FROM messages m2
-        WHERE m2.chat_id = messages.chat_id AND m2.client_id = messages.client_id
+        LEFT JOIN contact_mappings cm2
+          ON cm2.client_id = m2.client_id AND cm2.chat_id = m2.chat_id
+        WHERE m2.client_id = messages.client_id
+          AND COALESCE(cm2.phone, m2.chat_id) = COALESCE(cm.phone, messages.chat_id)
         ORDER BY created_at DESC
         LIMIT 1
       ) AS last_body,
       (
         SELECT sender
         FROM messages m2
-        WHERE m2.chat_id = messages.chat_id AND m2.client_id = messages.client_id
+        LEFT JOIN contact_mappings cm2
+          ON cm2.client_id = m2.client_id AND cm2.chat_id = m2.chat_id
+        WHERE m2.client_id = messages.client_id
+          AND COALESCE(cm2.phone, m2.chat_id) = COALESCE(cm.phone, messages.chat_id)
         ORDER BY created_at DESC
         LIMIT 1
       ) AS last_sender
     FROM messages
+    LEFT JOIN contact_mappings cm
+      ON cm.client_id = messages.client_id AND cm.chat_id = messages.chat_id
     WHERE ${where.join(" AND ")}
-    GROUP BY client_id, chat_id
+    GROUP BY messages.client_id, COALESCE(cm.phone, messages.chat_id)
     ORDER BY last_message_at DESC
     LIMIT @limit
   `).all(params);
+}
+
+export function listContactMappings({ clientId, phone, limit = 100 } = {}) {
+  const where = [];
+  const params = {};
+  if (clientId) {
+    where.push("client_id = @clientId");
+    params.clientId = clientId;
+  }
+  if (phone) {
+    where.push("phone = @phone");
+    params.phone = normalizePhone(phone);
+  }
+  params.limit = Math.min(Number(limit) || 100, 500);
+  return db.prepare(`
+    SELECT *
+    FROM contact_mappings
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    ORDER BY last_seen_at DESC
+    LIMIT @limit
+  `).all(params).map(mapContactMapping);
 }
 
 export function findLastOutboundClientForTarget(targetPhone) {
@@ -581,6 +664,63 @@ export function findLastOutboundClientForTarget(targetPhone) {
     LIMIT 1
   `).get({ targetPhoneLike: `%${phone}%` });
   return row?.client_id || null;
+}
+
+export function findLastClientForPhone(phone) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return null;
+  const row = db.prepare(`
+    SELECT client_id
+    FROM contact_mappings
+    WHERE phone = @phone
+    ORDER BY last_seen_at DESC
+    LIMIT 1
+  `).get({ phone: normalized });
+  return row?.client_id || null;
+}
+
+export function resolveChatIdForPhone({ phone, clientId }) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return null;
+  const where = ["phone = @phone"];
+  const params = { phone: normalized };
+  if (clientId) {
+    where.push("client_id = @clientId");
+    params.clientId = clientId;
+  }
+  return mapContactMapping(db.prepare(`
+    SELECT *
+    FROM contact_mappings
+    WHERE ${where.join(" AND ")}
+    ORDER BY last_seen_at DESC
+    LIMIT 1
+  `).get(params));
+}
+
+export function upsertContactMapping({ phone, clientId, chatId, contact = {} }) {
+  const normalized = normalizePhone(phone);
+  if (!normalized || !clientId || !chatId || !String(chatId).includes("@")) return null;
+  const timestamp = now();
+  const row = {
+    id: randomUUID(),
+    phone: normalized,
+    client_id: clientId,
+    chat_id: chatId,
+    contact_payload: json(contact),
+    created_at: timestamp,
+    updated_at: timestamp,
+    last_seen_at: timestamp
+  };
+  db.prepare(`
+    INSERT INTO contact_mappings (id, phone, client_id, chat_id, contact_payload, created_at, updated_at, last_seen_at)
+    VALUES (@id, @phone, @client_id, @chat_id, @contact_payload, @created_at, @updated_at, @last_seen_at)
+    ON CONFLICT(client_id, phone) DO UPDATE SET
+      chat_id = excluded.chat_id,
+      contact_payload = excluded.contact_payload,
+      updated_at = excluded.updated_at,
+      last_seen_at = excluded.last_seen_at
+  `).run(row);
+  return resolveChatIdForPhone({ phone: normalized, clientId });
 }
 
 export function getApiRequest(id) {
@@ -623,6 +763,40 @@ export function listWebhooks(eventName) {
     .all()
     .map(mapWebhook)
     .filter((hook) => !eventName || hook.events.includes(eventName) || hook.events.includes("*"));
+}
+
+function upsertContactMappingFromMessage(row, payload) {
+  if (!row.chat_id || !row.client_id) return;
+  const contact = payload?.contact || {};
+  const candidates = row.direction === "outbound"
+    ? [payload?.recipientPhone, contact.number, row.recipient]
+    : [payload?.senderPhone, contact.number, row.sender];
+  const phone = candidates.map(normalizePhone).find(Boolean);
+  if (!phone) return;
+  upsertContactMapping({
+    phone,
+    clientId: row.client_id,
+    chatId: row.chat_id,
+    contact
+  });
+}
+
+function listChatIdsForPhone(phone, clientId) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return [];
+  const where = ["phone = @phone"];
+  const params = { phone: normalized };
+  if (clientId) {
+    where.push("client_id = @clientId");
+    params.clientId = clientId;
+  }
+  return db.prepare(`
+    SELECT chat_id
+    FROM contact_mappings
+    WHERE ${where.join(" AND ")}
+    ORDER BY last_seen_at DESC
+    LIMIT 50
+  `).all(params).map((row) => row.chat_id);
 }
 
 function normalizePhone(value) {

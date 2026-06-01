@@ -286,7 +286,7 @@ function render() {
 
   $("chat-list").innerHTML = state.chats.length ? state.chats.map((chat) => `
     <article class="chat-item ${chat.chat_id === state.selectedChatId ? "active" : ""}" data-chat-id="${escapeHtml(chat.chat_id)}">
-      <strong>${escapeHtml(chat.chat_id)}</strong>
+      <strong>${escapeHtml(chat.conversation_key || chat.contact_phone || chat.chat_id)}</strong>
       <span>${escapeHtml(chat.last_body || "")}</span>
       <span>${escapeHtml(String(chat.message_count))} messages / ${relativeTime(chat.last_message_at)}</span>
     </article>
@@ -331,7 +331,7 @@ function render() {
       <p>${escapeHtml(message.body || "")}</p>
       <div class="message-meta">
         <span>${escapeHtml(t("clientLabel", { value: message.client_id }))}</span>
-        <span>${escapeHtml(t("chatLabel", { value: message.chat_id || "-" }))}</span>
+        <span>${escapeHtml(t("chatLabel", { value: message.conversation_key || message.contact_phone || message.chat_id || "-" }))}</span>
         <span title="${escapeHtml(fmt(message.created_at))}">${relativeTime(message.created_at)}</span>
       </div>
     </article>
@@ -1023,6 +1023,7 @@ function bindEvents() {
       body: JSON.stringify({
         clientId: state.selectedClientId,
         to: state.selectedChatId,
+        chatId: state.selectedChatId,
         body,
         media
       })

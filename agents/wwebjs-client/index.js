@@ -101,8 +101,8 @@ socket.on("connect_error", (error) => {
 socket.on("task:send-message", async (task, ack) => {
   ack?.({ accepted: true });
   try {
-    const { to, body } = task.payload;
-    const chatId = to.includes("@c.us") ? to : `${to.replace(/\D/g, "")}@c.us`;
+    const { to, chatId: payloadChatId, body } = task.payload;
+    const chatId = normalizeChatId(payloadChatId || to);
     const mediaPayload = task.payload.media;
     const localMediaPath = mediaPayload?.url ? await downloadMedia(mediaPayload) : null;
     const result = localMediaPath
@@ -125,6 +125,16 @@ socket.on("task:send-message", async (task, ack) => {
       ok: false,
       error: error.message
     });
+  }
+});
+
+socket.on("contact:resolve", async (payload = {}, ack) => {
+  try {
+    const chatId = normalizeChatId(payload.chatId || payload.id || payload.to);
+    const contact = await whatsapp.getContactById(chatId);
+    ack?.({ ok: true, contact: serializeContact(contact), chatId });
+  } catch (error) {
+    ack?.({ ok: false, error: error.message });
   }
 });
 
@@ -185,12 +195,16 @@ whatsapp.on("disconnected", (reason) => {
 });
 
 whatsapp.on("message", async (message) => {
+  const contact = await resolveMessageContact(message);
+  const contactInfo = serializeContact(contact);
+  const senderId = message.author || message.from;
+  const senderPhone = contactInfo?.number || contactInfo?.phone || null;
   socket.emit("message:created", {
     clientId: config.clientId,
     externalId: message.id?._serialized,
     direction: message.fromMe ? "outbound" : "inbound",
     chatId: message.from,
-    sender: message.author || message.from,
+    sender: senderPhone || senderId,
     recipient: message.to,
     body: message.body,
     messageType: message.type,
@@ -199,6 +213,9 @@ whatsapp.on("message", async (message) => {
       from: message.from,
       to: message.to,
       author: message.author,
+      senderId,
+      senderPhone,
+      contact: contactInfo,
       hasMedia: message.hasMedia,
       type: message.type
     }
@@ -209,6 +226,42 @@ whatsapp.initialize();
 
 function safeFileName(value) {
   return String(value || "client").replace(/[^a-zA-Z0-9_.-]/g, "-");
+}
+
+function normalizeChatId(value) {
+  const target = String(value || "").trim();
+  if (target.includes("@")) return target;
+  const digits = target.replace(/\D/g, "");
+  if (!digits) throw new Error("message target is empty or invalid");
+  return `${digits}@c.us`;
+}
+
+async function resolveMessageContact(message) {
+  try {
+    return await message.getContact();
+  } catch {
+    return null;
+  }
+}
+
+function serializeContact(contact) {
+  if (!contact) return null;
+  return {
+    id: contact.id?._serialized || null,
+    server: contact.id?.server || null,
+    user: contact.id?.user || null,
+    number: contact.number || null,
+    name: contact.name || null,
+    pushname: contact.pushname || null,
+    shortName: contact.shortName || null,
+    isBusiness: Boolean(contact.isBusiness),
+    isEnterprise: Boolean(contact.isEnterprise),
+    isGroup: Boolean(contact.isGroup),
+    isMe: Boolean(contact.isMe),
+    isMyContact: Boolean(contact.isMyContact),
+    isUser: Boolean(contact.isUser),
+    isWAContact: Boolean(contact.isWAContact)
+  };
 }
 
 function findInstalledBrowser() {

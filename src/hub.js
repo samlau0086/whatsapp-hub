@@ -223,6 +223,16 @@ export function chooseClient(requestedClientId) {
   return clients[Math.floor(Math.random() * clients.length)];
 }
 
+export async function resolveContactForClient(clientId, chatId) {
+  const socket = getLiveClientSocket(clientId);
+  if (!socket) return { ok: false, error: `client ${clientId} is offline` };
+  try {
+    return await socket.timeout(15_000).emitWithAck("contact:resolve", { chatId });
+  } catch {
+    return { ok: false, error: `client ${clientId} did not answer contact resolve request` };
+  }
+}
+
 export function reconcileClientPresence() {
   const updated = [];
   for (const client of listOnlineClients()) {
