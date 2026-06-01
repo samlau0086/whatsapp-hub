@@ -587,9 +587,9 @@ export function listMessages({ clientId, sender, chatId, targetPhone, limit = 10
 
 export function listChats({ clientId, limit = 100 } = {}) {
   const params = { limit: Math.min(Number(limit) || 100, 500) };
-  const where = ["chat_id IS NOT NULL", "chat_id != ''"];
+  const where = ["messages.chat_id IS NOT NULL", "messages.chat_id != ''"];
   if (clientId) {
-    where.push("client_id = @clientId");
+    where.push("messages.client_id = @clientId");
     params.clientId = clientId;
   }
   return db.prepare(`
@@ -608,7 +608,7 @@ export function listChats({ clientId, limit = 100 } = {}) {
           ON cm2.client_id = m2.client_id AND cm2.chat_id = m2.chat_id
         WHERE m2.client_id = messages.client_id
           AND COALESCE(cm2.phone, m2.chat_id) = COALESCE(cm.phone, messages.chat_id)
-        ORDER BY created_at DESC
+        ORDER BY m2.created_at DESC
         LIMIT 1
       ) AS last_body,
       (
@@ -618,7 +618,7 @@ export function listChats({ clientId, limit = 100 } = {}) {
           ON cm2.client_id = m2.client_id AND cm2.chat_id = m2.chat_id
         WHERE m2.client_id = messages.client_id
           AND COALESCE(cm2.phone, m2.chat_id) = COALESCE(cm.phone, messages.chat_id)
-        ORDER BY created_at DESC
+        ORDER BY m2.created_at DESC
         LIMIT 1
       ) AS last_sender
     FROM messages
