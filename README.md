@@ -344,6 +344,8 @@ WEB_ADMIN_PASSWORD
 4. 把两个文件放到同一个文件夹。
 5. 双击 `xxx-install.bat`。
 
+如果脚本提示 Node.js 或 npm 安装失败，通常是网络无法访问官方下载地址。请先按后面“内网电脑手动安装 Node.js 和 npm”章节手动安装 Node.js LTS，再重新双击 `xxx-install.bat`。
+
 首次运行后，脚本会自动生成：
 
 ```text
@@ -863,6 +865,167 @@ agents/wwebjs-client/index.js
 ```
 
 但推荐 clone 完整仓库，后续更新更方便。
+
+### 内网电脑手动安装 Node.js 和 npm
+
+Client agent 需要 Node.js 和 npm。推荐安装 Node.js LTS 版本，例如 Node.js 20 LTS 或 22 LTS。安装完成后，打开新的终端窗口，执行：
+
+```bash
+node -v
+npm -v
+```
+
+如果两个命令都能显示版本号，说明 Node.js 和 npm 已经安装成功。
+
+#### Windows 手动安装
+
+方式一：下载安装包安装，适合不懂命令行的用户。
+
+1. 打开 Node.js 官网：`https://nodejs.org/`
+2. 下载 `LTS` 版本的 Windows Installer，文件名通常类似 `node-v20.x.x-x64.msi` 或 `node-v22.x.x-x64.msi`。
+3. 双击安装，一路点击 `Next`。
+4. 安装完成后，关闭所有 PowerShell / CMD 窗口。
+5. 重新打开 PowerShell，执行：
+
+```powershell
+node -v
+npm -v
+```
+
+方式二：使用 winget 安装。
+
+```powershell
+winget install OpenJS.NodeJS.LTS
+```
+
+方式三：如果已经安装 Chocolatey。
+
+```powershell
+choco install nodejs-lts -y
+```
+
+如果提示 `node` 或 `npm` 不是内部或外部命令，通常是 PATH 没刷新。请关闭当前终端，重新打开；如果还不行，重启电脑。
+
+#### macOS 手动安装
+
+方式一：下载安装包。
+
+1. 打开 `https://nodejs.org/`
+2. 下载 macOS 的 `LTS` 安装包。
+3. 安装完成后重新打开 Terminal。
+4. 执行：
+
+```bash
+node -v
+npm -v
+```
+
+方式二：如果已经安装 Homebrew。
+
+```bash
+brew install node@20
+```
+
+如果 `node -v` 仍然找不到命令，可以尝试：
+
+```bash
+brew link node@20 --force
+```
+
+#### Linux 手动安装
+
+Ubuntu / Debian 推荐使用 NodeSource：
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+node -v
+npm -v
+```
+
+如果服务器或内网电脑访问 NodeSource 很慢，也可以先尝试系统源：
+
+```bash
+sudo apt update
+sudo apt install -y nodejs npm
+node -v
+npm -v
+```
+
+注意：系统源里的 Node.js 版本有时比较旧。如果 `node -v` 显示低于 `v18`，建议改用 NodeSource、nvm，或直接下载 Node.js 官方二进制包。
+
+#### npm install 网络失败时怎么办
+
+在 agent 文件夹里执行 `npm install` 时，如果出现下载失败、超时、Puppeteer/Chrome 下载失败，可以按下面顺序处理。
+
+第一步：清理 npm 缓存后重试。
+
+```bash
+npm cache clean --force
+npm install
+```
+
+第二步：切换 npm registry 后重试。中国大陆网络可以尝试：
+
+```bash
+npm config set registry https://registry.npmmirror.com
+npm install
+```
+
+以后如果想切回官方源：
+
+```bash
+npm config set registry https://registry.npmjs.org
+```
+
+第三步：如果失败点是 Puppeteer 下载 Chrome，可以使用本机已经安装好的 Chrome / Edge，并跳过 Puppeteer 自动下载。
+
+Windows 常见路径：
+
+```text
+C:\Program Files\Google\Chrome\Application\chrome.exe
+C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
+```
+
+在 `.env` 里填写：
+
+```bash
+PUPPETEER_SKIP_DOWNLOAD=true
+PUPPETEER_EXECUTABLE_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
+```
+
+然后重新执行：
+
+```bash
+npm install
+```
+
+如果你使用的是生成的 Windows `xxx-install.bat`，也可以先手动安装 Chrome 或 Edge，再重新运行安装 BAT。脚本会优先使用 `.env` 里配置的 `PUPPETEER_EXECUTABLE_PATH`。
+
+第四步：如果 `node_modules` 目录已经安装到一半，导致反复失败，可以删除 agent 文件夹里的 `node_modules` 和 `package-lock.json` 后重试。
+
+Windows PowerShell：
+
+```powershell
+Remove-Item -Recurse -Force .\node_modules -ErrorAction SilentlyContinue
+Remove-Item -Force .\package-lock.json -ErrorAction SilentlyContinue
+npm install
+```
+
+macOS / Linux：
+
+```bash
+rm -rf node_modules package-lock.json
+npm install
+```
+
+#### 常见判断
+
+- `node -v` 不显示版本：Node.js 没安装成功，或终端没有刷新 PATH。
+- `npm -v` 不显示版本：npm 没安装成功，建议重新安装 Node.js LTS。
+- `npm install` 卡住很久：多半是网络访问 npm 或 Chrome 下载源很慢，可以切换 npm registry，或配置 `PUPPETEER_EXECUTABLE_PATH`。
+- Windows 报 `EPERM`、`operation not permitted`：关闭正在运行的 agent、Chrome、杀毒软件拦截窗口，再重新运行安装命令。
+- 已经手动装好 Node.js 后：重新打开终端，再运行生成的 `xxx-install.bat` 或 `npm install`。
 
 ### Agent 环境变量
 
