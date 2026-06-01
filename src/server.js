@@ -1046,7 +1046,7 @@ function powershellEncodedWriteEnv(env) {
 
 async function createAndDispatchMessageTask(req, res) {
   const { clientId, to, chatId, body, metadata, media } = req.body || {};
-  const target = chatId || to;
+  const target = to || chatId;
   if (!target || (!body && !media)) {
     res.status(400).json({ error: "to/chatId and body or media are required" });
     return null;
@@ -1068,7 +1068,7 @@ async function createAndDispatchMessageTask(req, res) {
     clientId: client.id,
     targetPhone: target,
     payload: {
-      to: to || target,
+      to: target,
       chatId: resolvedChatId,
       body: body || "",
       media: media || null,

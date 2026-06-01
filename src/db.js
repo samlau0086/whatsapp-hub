@@ -9,6 +9,7 @@ fs.mkdirSync(path.dirname(config.databasePath), { recursive: true });
 export const db = new Database(config.databasePath);
 db.pragma("journal_mode = WAL");
 db.function("stripChatIdServer", (value) => String(value || "").split("@")[0]);
+db.function("digitsOnly", (value) => String(value || "").replace(/\D/g, ""));
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS clients (
@@ -547,6 +548,8 @@ export function getMessage(id) {
       AND (
         cm.chat_id = messages.chat_id
         OR stripChatIdServer(cm.chat_id) = stripChatIdServer(messages.chat_id)
+        OR cm.phone = digitsOnly(messages.sender)
+        OR cm.phone = digitsOnly(messages.recipient)
       )
     WHERE messages.id = ?
   `).get(id));
@@ -586,6 +589,8 @@ export function listMessages({ clientId, sender, chatId, targetPhone, limit = 10
       AND (
         cm.chat_id = messages.chat_id
         OR stripChatIdServer(cm.chat_id) = stripChatIdServer(messages.chat_id)
+        OR cm.phone = digitsOnly(messages.sender)
+        OR cm.phone = digitsOnly(messages.recipient)
       )
     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
     ORDER BY messages.created_at DESC
@@ -618,6 +623,8 @@ export function listChats({ clientId, limit = 100 } = {}) {
           AND (
             cm2.chat_id = m2.chat_id
             OR stripChatIdServer(cm2.chat_id) = stripChatIdServer(m2.chat_id)
+            OR cm2.phone = digitsOnly(m2.sender)
+            OR cm2.phone = digitsOnly(m2.recipient)
           )
         WHERE m2.client_id = messages.client_id
           AND COALESCE(cm2.phone, m2.chat_id) = COALESCE(cm.phone, messages.chat_id)
@@ -632,6 +639,8 @@ export function listChats({ clientId, limit = 100 } = {}) {
           AND (
             cm2.chat_id = m2.chat_id
             OR stripChatIdServer(cm2.chat_id) = stripChatIdServer(m2.chat_id)
+            OR cm2.phone = digitsOnly(m2.sender)
+            OR cm2.phone = digitsOnly(m2.recipient)
           )
         WHERE m2.client_id = messages.client_id
           AND COALESCE(cm2.phone, m2.chat_id) = COALESCE(cm.phone, messages.chat_id)
@@ -644,6 +653,8 @@ export function listChats({ clientId, limit = 100 } = {}) {
       AND (
         cm.chat_id = messages.chat_id
         OR stripChatIdServer(cm.chat_id) = stripChatIdServer(messages.chat_id)
+        OR cm.phone = digitsOnly(messages.sender)
+        OR cm.phone = digitsOnly(messages.recipient)
       )
     WHERE ${where.join(" AND ")}
     GROUP BY messages.client_id, COALESCE(cm.phone, messages.chat_id)
