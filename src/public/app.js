@@ -231,6 +231,24 @@ function selectedChat() {
   return state.chats.find((chat) => chat.chat_id === state.selectedChatId);
 }
 
+function selectedChatPhone(chat = selectedChat()) {
+  const key = String(chat?.contact_phone || chat?.conversation_key || "");
+  return /^\d+$/.test(key) ? key : "";
+}
+
+function messageMatchesActiveChat(message, chat = selectedChat()) {
+  if (!state.selectedClientId || !state.selectedChatId || message.client_id !== state.selectedClientId) return false;
+  if (message.chat_id === state.selectedChatId) return true;
+  const keys = new Set([
+    chat?.contact_phone,
+    chat?.conversation_key,
+    chat?.conversation_id
+  ].filter(Boolean).map(String));
+  return keys.has(String(message.contact_phone || ""))
+    || keys.has(String(message.conversation_key || ""))
+    || keys.has(String(message.conversation_id || ""));
+}
+
 function render() {
   const onlineCount = state.clients.filter((client) => client.status === "online").length;
   const runningCount = state.tasks.filter((task) => task.status === "running").length;
@@ -240,7 +258,7 @@ function render() {
   const tasks = scopedTasks();
   const messages = scopedMessages();
   const activeChatMessages = state.selectedChatId
-    ? state.messages.filter((message) => message.client_id === state.selectedClientId && message.chat_id === state.selectedChatId)
+    ? state.messages.filter((message) => messageMatchesActiveChat(message, activeChat))
     : [];
 
   applyLanguage();
@@ -728,6 +746,20 @@ async function refreshChats() {
   state.chats = (await api(`/admin/api/chats?clientId=${encodeURIComponent(state.selectedClientId)}&limit=100`)).chats;
 }
 
+async function loadActiveChatMessages() {
+  if (!state.selectedClientId || !state.selectedChatId) return;
+  const chat = selectedChat();
+  const phone = selectedChatPhone(chat);
+  const query = phone
+    ? `targetPhone=${encodeURIComponent(phone)}`
+    : `chatId=${encodeURIComponent(state.selectedChatId)}`;
+  const messages = await api(`/admin/api/messages?clientId=${encodeURIComponent(state.selectedClientId)}&${query}&limit=100`);
+  state.messages = [
+    ...messages.messages,
+    ...state.messages.filter((message) => !messageMatchesActiveChat(message, chat))
+  ].slice(0, 200);
+}
+
 async function logout() {
   await api("/auth/logout", { method: "POST" }).catch(() => {});
   window.location.href = "/login";
@@ -1029,11 +1061,7 @@ function bindEvents() {
     if (!item) return;
     state.selectedChatId = item.dataset.chatId;
     state.editingChatMapping = false;
-    const messages = await api(`/admin/api/messages?clientId=${encodeURIComponent(state.selectedClientId)}&chatId=${encodeURIComponent(state.selectedChatId)}&limit=100`);
-    state.messages = [
-      ...messages.messages,
-      ...state.messages.filter((message) => message.client_id !== state.selectedClientId || message.chat_id !== state.selectedChatId)
-    ].slice(0, 200);
+    await loadActiveChatMessages();
     render();
   });
 
@@ -1092,6 +1120,12 @@ function bindEvents() {
         $("chat-file").value = "";
         showToast(t("taskDispatched"));
         render();
+        window.setTimeout(() => {
+          refreshChats()
+            .then(loadActiveChatMessages)
+            .then(render)
+            .catch(() => {});
+        }, 1200);
       })
       .catch((error) => showToast(error.message));
   });
@@ -1182,11 +1216,7 @@ async function saveChatMapping() {
     .then(async () => {
       state.editingChatMapping = false;
       await refreshChats();
-      const messages = await api(`/admin/api/messages?clientId=${encodeURIComponent(state.selectedClientId)}&chatId=${encodeURIComponent(state.selectedChatId)}&limit=100`);
-      state.messages = [
-        ...messages.messages,
-        ...state.messages.filter((message) => message.client_id !== state.selectedClientId || message.chat_id !== state.selectedChatId)
-      ].slice(0, 200);
+      await loadActiveChatMessages();
       showToast("Phone mapping updated");
       render();
     })
