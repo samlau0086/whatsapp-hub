@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS contact_mappings (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   last_seen_at TEXT NOT NULL,
-  UNIQUE(client_id, phone)
+  UNIQUE(client_id, chat_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_contact_mappings_phone ON contact_mappings(phone);
@@ -160,6 +160,7 @@ CREATE INDEX IF NOT EXISTS idx_contact_mappings_chat ON contact_mappings(client_
 `);
 
 ensureColumn("client_configs", "agent_token", "TEXT");
+migrateContactMappingsToAliases();
 
 const now = () => new Date().toISOString();
 const json = (value) => JSON.stringify(value === undefined ? {} : value);
@@ -715,7 +716,9 @@ export function resolveChatIdForPhone({ phone, clientId }) {
     SELECT *
     FROM contact_mappings
     WHERE ${where.join(" AND ")}
-    ORDER BY last_seen_at DESC
+    ORDER BY
+      CASE WHEN stripChatIdServer(chat_id) = @phone THEN 1 ELSE 0 END,
+      last_seen_at DESC
     LIMIT 1
   `).get(params));
 }
@@ -737,8 +740,8 @@ export function upsertContactMapping({ phone, clientId, chatId, contact = {} }) 
   db.prepare(`
     INSERT INTO contact_mappings (id, phone, client_id, chat_id, contact_payload, created_at, updated_at, last_seen_at)
     VALUES (@id, @phone, @client_id, @chat_id, @contact_payload, @created_at, @updated_at, @last_seen_at)
-    ON CONFLICT(client_id, phone) DO UPDATE SET
-      chat_id = excluded.chat_id,
+    ON CONFLICT(client_id, chat_id) DO UPDATE SET
+      phone = excluded.phone,
       contact_payload = excluded.contact_payload,
       updated_at = excluded.updated_at,
       last_seen_at = excluded.last_seen_at
@@ -817,7 +820,9 @@ function listChatIdsForPhone(phone, clientId) {
     SELECT chat_id
     FROM contact_mappings
     WHERE ${where.join(" AND ")}
-    ORDER BY last_seen_at DESC
+    ORDER BY
+      CASE WHEN stripChatIdServer(chat_id) = @phone THEN 1 ELSE 0 END,
+      last_seen_at DESC
     LIMIT 50
   `).all(params).map((row) => row.chat_id);
 }
@@ -846,6 +851,39 @@ function contactPhoneSql(alias) {
 
 function normalizePhone(value) {
   return String(value || "").replace(/\D/g, "");
+}
+
+function migrateContactMappingsToAliases() {
+  const table = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'contact_mappings'").get();
+  if (!table?.sql?.includes("UNIQUE(client_id, phone)")) return;
+  const oldTable = `contact_mappings_old_${Date.now()}`;
+  db.transaction(() => {
+    db.prepare(`ALTER TABLE contact_mappings RENAME TO ${oldTable}`).run();
+    db.prepare(`
+      CREATE TABLE contact_mappings (
+        id TEXT PRIMARY KEY,
+        phone TEXT NOT NULL,
+        client_id TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        contact_payload TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        UNIQUE(client_id, chat_id)
+      )
+    `).run();
+    db.prepare(`
+      INSERT OR IGNORE INTO contact_mappings (
+        id, phone, client_id, chat_id, contact_payload, created_at, updated_at, last_seen_at
+      )
+      SELECT id, phone, client_id, chat_id, contact_payload, created_at, updated_at, last_seen_at
+      FROM ${oldTable}
+      ORDER BY last_seen_at DESC, updated_at DESC
+    `).run();
+    db.prepare(`DROP TABLE ${oldTable}`).run();
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_contact_mappings_phone ON contact_mappings(phone)").run();
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_contact_mappings_chat ON contact_mappings(client_id, chat_id)").run();
+  })();
 }
 
 export function createUser({ username, displayName, passwordHash, role = "viewer", enabled = true }) {
