@@ -162,6 +162,7 @@ CREATE INDEX IF NOT EXISTS idx_contact_mappings_chat ON contact_mappings(client_
 ensureColumn("client_configs", "agent_token", "TEXT");
 migrateContactMappingsToAliases();
 repairContactMappingAliases();
+repairContactMappingsFromTasks();
 
 const now = () => new Date().toISOString();
 const json = (value) => JSON.stringify(value === undefined ? {} : value);
@@ -430,6 +431,7 @@ export function createTask({ type, clientId = null, targetPhone = null, payload 
     INSERT INTO tasks (id, type, status, client_id, target_phone, payload, created_at, updated_at)
     VALUES (@id, @type, @status, @client_id, @target_phone, @payload, @created_at, @updated_at)
   `).run(task);
+  upsertContactMappingFromTask(task);
   return getTask(task.id);
 }
 
@@ -762,18 +764,18 @@ export function upsertContactMapping({ phone, clientId, chatId, contact = {} }) 
   if (!normalized || !clientId || !chatId || !String(chatId).includes("@")) return null;
   const timestamp = now();
   const existing = getContactMappingByChatId({ clientId, chatId });
-  const isManual = contact?.source === "manual";
+  const isAuthoritative = ["manual", "task", "task_recovery"].includes(contact?.source);
   const sibling = existing || getPreferredContactMappingForChatId({ clientId, chatId });
-  const nextPhone = sibling && !isManual ? sibling.phone : normalized;
+  const nextPhone = sibling && !isAuthoritative ? sibling.phone : normalized;
   const row = {
     id: randomUUID(),
     phone: nextPhone,
     client_id: clientId,
     chat_id: chatId,
     contact_payload: json({
-      ...(existing && !isManual ? existing.contact_payload : {}),
+      ...(existing && !isAuthoritative ? existing.contact_payload : {}),
       ...contact,
-      preservedPhone: existing && !isManual && existing.phone !== normalized ? normalized : undefined
+      preservedPhone: existing && !isAuthoritative && existing.phone !== normalized ? normalized : undefined
     }),
     created_at: timestamp,
     updated_at: timestamp,
@@ -790,7 +792,7 @@ export function upsertContactMapping({ phone, clientId, chatId, contact = {} }) 
         last_seen_at = excluded.last_seen_at
     `).run(row);
 
-    if (isManual) {
+    if (isAuthoritative) {
       db.prepare(`
         UPDATE contact_mappings
         SET phone = @phone,
@@ -860,6 +862,25 @@ function upsertContactMappingFromMessage(row, payload) {
     clientId: row.client_id,
     chatId: row.chat_id,
     contact
+  });
+}
+
+function upsertContactMappingFromTask(task) {
+  if (task.type !== "send-message" || !task.client_id || !task.target_phone) return;
+  const payload = parseJson(task.payload);
+  const chatId = payload?.chatId;
+  const phone = normalizePhone(task.target_phone);
+  if (!phone || !chatId || !String(chatId).includes("@")) return;
+  upsertContactMapping({
+    phone,
+    clientId: task.client_id,
+    chatId,
+    contact: {
+      number: phone,
+      id: chatId,
+      source: "task",
+      taskId: task.id
+    }
   });
 }
 
@@ -968,6 +989,21 @@ function repairContactMappingAliases() {
           AND preferred.phone != stripChatIdServer(preferred.chat_id)
       )
   `).run({ timestamp: new Date().toISOString() });
+}
+
+function repairContactMappingsFromTasks() {
+  const rows = db.prepare(`
+    SELECT id, type, client_id, target_phone, payload
+    FROM tasks
+    WHERE type = 'send-message'
+      AND client_id IS NOT NULL
+      AND target_phone IS NOT NULL
+    ORDER BY created_at DESC
+    LIMIT 5000
+  `).all();
+  for (const row of rows) {
+    upsertContactMappingFromTask(row);
+  }
 }
 
 export function createUser({ username, displayName, passwordHash, role = "viewer", enabled = true }) {
