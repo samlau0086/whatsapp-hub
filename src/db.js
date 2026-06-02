@@ -10,6 +10,8 @@ export const db = new Database(config.databasePath);
 db.pragma("journal_mode = WAL");
 db.function("stripChatIdServer", (value) => String(value || "").split("@")[0]);
 db.function("digitsOnly", (value) => String(value || "").replace(/\D/g, ""));
+db.function("jsonPhone", (value, key) => normalizePhone(parseJson(value)?.[key]));
+db.function("jsonContactPhone", (value) => normalizePhone(parseJson(value)?.contact?.number));
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS clients (
@@ -906,28 +908,52 @@ function listChatIdsForPhone(phone, clientId) {
 }
 
 function contactPhoneSql(alias) {
-  return `(
-    SELECT cm.phone
-    FROM contact_mappings cm
-    WHERE cm.client_id = ${alias}.client_id
-      AND (
-        cm.chat_id = ${alias}.chat_id
-        OR stripChatIdServer(cm.chat_id) = stripChatIdServer(${alias}.chat_id)
-        OR cm.phone = digitsOnly(${alias}.sender)
-        OR cm.phone = digitsOnly(${alias}.recipient)
-      )
-    ORDER BY
-      CASE
-        WHEN cm.phone != stripChatIdServer(${alias}.chat_id) THEN 0
-        ELSE 1
-      END,
-      CASE
-        WHEN cm.chat_id = ${alias}.chat_id THEN 0
-        WHEN stripChatIdServer(cm.chat_id) = stripChatIdServer(${alias}.chat_id) THEN 1
-        ELSE 2
-      END,
-      cm.last_seen_at DESC
-    LIMIT 1
+  return `COALESCE(
+    (
+      SELECT cm.phone
+      FROM contact_mappings cm
+      WHERE cm.client_id = ${alias}.client_id
+        AND (
+          cm.chat_id = ${alias}.chat_id
+          OR stripChatIdServer(cm.chat_id) = stripChatIdServer(${alias}.chat_id)
+          OR cm.phone = digitsOnly(${alias}.sender)
+          OR cm.phone = digitsOnly(${alias}.recipient)
+          OR cm.phone = jsonPhone(${alias}.payload, 'senderPhone')
+          OR cm.phone = jsonPhone(${alias}.payload, 'recipientPhone')
+          OR cm.phone = jsonContactPhone(${alias}.payload)
+        )
+      ORDER BY
+        CASE
+          WHEN cm.phone != stripChatIdServer(${alias}.chat_id) THEN 0
+          ELSE 1
+        END,
+        CASE
+          WHEN cm.chat_id = ${alias}.chat_id THEN 0
+          WHEN stripChatIdServer(cm.chat_id) = stripChatIdServer(${alias}.chat_id) THEN 1
+          ELSE 2
+        END,
+        cm.last_seen_at DESC
+      LIMIT 1
+    ),
+    (
+      SELECT digitsOnly(tasks.target_phone)
+      FROM tasks
+      WHERE tasks.client_id = ${alias}.client_id
+        AND tasks.type = 'send-message'
+        AND digitsOnly(tasks.target_phone) != ''
+        AND (
+          tasks.payload LIKE '%' || ${alias}.chat_id || '%'
+          OR tasks.payload LIKE '%' || stripChatIdServer(${alias}.chat_id) || '%'
+          OR digitsOnly(tasks.target_phone) = stripChatIdServer(${alias}.chat_id)
+          OR digitsOnly(tasks.target_phone) = digitsOnly(${alias}.sender)
+          OR digitsOnly(tasks.target_phone) = digitsOnly(${alias}.recipient)
+        )
+      ORDER BY tasks.created_at DESC
+      LIMIT 1
+    ),
+    NULLIF(jsonPhone(${alias}.payload, 'recipientPhone'), ''),
+    NULLIF(jsonPhone(${alias}.payload, 'senderPhone'), ''),
+    NULLIF(jsonContactPhone(${alias}.payload), '')
   )`;
 }
 
