@@ -160,9 +160,6 @@ CREATE INDEX IF NOT EXISTS idx_contact_mappings_chat ON contact_mappings(client_
 `);
 
 ensureColumn("client_configs", "agent_token", "TEXT");
-migrateContactMappingsToAliases();
-repairContactMappingAliases();
-repairContactMappingsFromTasks();
 
 const now = () => new Date().toISOString();
 const json = (value) => JSON.stringify(value === undefined ? {} : value);
@@ -173,6 +170,10 @@ const parseJson = (value, fallback = {}) => {
     return fallback;
   }
 };
+
+migrateContactMappingsToAliases();
+repairContactMappingAliases();
+repairContactMappingsFromTasks();
 
 const mapClient = (row) => row && ({ ...row, metadata: parseJson(row.metadata) });
 const mapTask = (row) => row && ({ ...row, payload: parseJson(row.payload), result: parseJson(row.result, null) });
