@@ -11,7 +11,8 @@ import {
   setClientStatus,
   touchClient,
   updateTask,
-  upsertClient
+  upsertClient,
+  upsertContactMapping
 } from "./db.js";
 import { config } from "./config.js";
 
@@ -101,6 +102,9 @@ export function createHub(httpServer) {
       const message = createMessage({ ...payload, clientId });
       io.emit("message:created", message);
       await dispatchWebhook("message.created", message);
+      resolveAndStoreContactMapping(io, message).catch((error) => {
+        console.error("failed to auto-resolve contact mapping", error);
+      });
       ack?.({ ok: true, message });
     });
 
@@ -238,6 +242,32 @@ export async function resolveContactForClient(clientId, chatId) {
   } catch {
     return { ok: false, error: `client ${clientId} did not answer contact resolve request` };
   }
+}
+
+async function resolveAndStoreContactMapping(io, message) {
+  if (!message?.client_id || !message?.chat_id || message.contact_phone) return null;
+  const result = await resolveContactForClient(message.client_id, message.chat_id);
+  const phone = normalizePhone(result?.contact?.number || result?.contact?.phone);
+  if (!result?.ok || !phone) return null;
+  const mapping = upsertContactMapping({
+    phone,
+    clientId: message.client_id,
+    chatId: result.chatId || message.chat_id,
+    contact: {
+      ...(result.contact || {}),
+      number: phone,
+      id: result.chatId || message.chat_id,
+      source: "auto_resolve"
+    }
+  });
+  if (mapping) {
+    io.emit("contact:mapping-updated", mapping);
+  }
+  return mapping;
+}
+
+function normalizePhone(value) {
+  return String(value || "").replace(/\D/g, "");
 }
 
 export function reconcileClientPresence() {

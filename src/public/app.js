@@ -827,6 +827,15 @@ function connectSocket() {
     if (message.client_id === state.selectedClientId) refreshChats();
     render();
   });
+  state.socket.on("contact:mapping-updated", (mapping) => {
+    if (!can("messages:read")) return;
+    if (mapping?.client_id === state.selectedClientId) {
+      refreshChats()
+        .then(loadActiveChatMessages)
+        .then(render)
+        .catch(() => {});
+    }
+  });
 }
 
 async function refreshChats() {
