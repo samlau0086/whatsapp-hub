@@ -304,6 +304,40 @@ function messageDisplayBody(message) {
   return message.body || "";
 }
 
+function renderMessageContent(message) {
+  const media = message.payload?.media;
+  const body = message.body || message.payload?.caption || "";
+  if (!media?.url) return `<p>${escapeHtml(messageDisplayBody(message))}</p>`;
+
+  const mimeType = String(media.mimeType || "");
+  const name = media.originalName || media.filename || "Attachment";
+  const url = media.url;
+  const caption = body && body !== name ? `<p>${escapeHtml(body)}</p>` : "";
+  if (mimeType.startsWith("image/")) {
+    return `
+      <a class="media-preview media-preview-image" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">
+        <img src="${escapeHtml(url)}" alt="${escapeHtml(name)}" loading="lazy" />
+      </a>
+      ${caption}
+    `;
+  }
+  if (mimeType.startsWith("video/")) {
+    return `
+      <video class="media-preview media-preview-video" controls preload="metadata">
+        <source src="${escapeHtml(url)}" type="${escapeHtml(mimeType)}" />
+      </video>
+      ${caption}
+    `;
+  }
+  return `
+    <a class="media-file" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">
+      <span class="media-file-icon">file</span>
+      <span>${escapeHtml(name)}</span>
+    </a>
+    ${caption}
+  `;
+}
+
 function render() {
   const onlineCount = state.clients.filter((client) => client.status === "online").length;
   const runningCount = state.tasks.filter((task) => task.status === "running").length;
@@ -373,7 +407,7 @@ function render() {
 
   $("chat-messages").innerHTML = activeChatMessages.length ? activeChatMessages.map((message) => `
     <article class="chat-bubble ${escapeHtml(message.direction || "inbound")}">
-      <p>${escapeHtml(messageDisplayBody(message))}</p>
+      ${renderMessageContent(message)}
       <span>${escapeHtml(message.sender || "-")} / ${escapeHtml(fmt(message.created_at))}</span>
     </article>
   `).join("") : `<div class="empty-state">${escapeHtml(t("selectChat"))}</div>`;

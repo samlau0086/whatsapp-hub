@@ -379,6 +379,62 @@ p {
   overflow-wrap: anywhere;
 }
 
+.media-preview {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: block;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.media-preview img,
+.media-preview video,
+.media-preview-video {
+  background: #000;
+  display: block;
+  max-height: 360px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.media-preview-image img {
+  width: min(360px, 100%);
+}
+
+.media-preview-video {
+  width: min(420px, 100%);
+}
+
+.media-file {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+  max-width: 100%;
+  padding: 10px;
+  text-decoration: none;
+}
+
+.media-file span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-file-icon {
+  background: var(--control-bg);
+  border-radius: 6px;
+  color: var(--control-text);
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 4px 6px;
+  text-transform: uppercase;
+}
+
 .chat-bubble span {
   color: var(--muted);
   display: block;
