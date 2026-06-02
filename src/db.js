@@ -171,10 +171,6 @@ const parseJson = (value, fallback = {}) => {
   }
 };
 
-migrateContactMappingsToAliases();
-repairContactMappingAliases();
-repairContactMappingsFromTasks();
-
 const mapClient = (row) => row && ({ ...row, metadata: parseJson(row.metadata) });
 const mapTask = (row) => row && ({ ...row, payload: parseJson(row.payload), result: parseJson(row.result, null) });
 const mapMessage = (row) => {
@@ -201,6 +197,10 @@ const mapApiToken = (row) => row && ({
 });
 const mapClientConfig = (row) => row && ({ ...row, headless: Boolean(row.headless) });
 const mapContactMapping = (row) => row && ({ ...row, contact_payload: parseJson(row.contact_payload, {}) });
+
+migrateContactMappingsToAliases();
+repairContactMappingAliases();
+repairContactMappingsFromTasks();
 
 seedAdminUser();
 ensureSuperAdminUser();
