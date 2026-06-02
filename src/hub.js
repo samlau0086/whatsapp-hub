@@ -117,6 +117,7 @@ export function createHub(httpServer) {
       });
       if (payload.ok && task.type === "send-message") {
         const mappedContact = resolveChatIdForPhone({ phone: task.target_phone, clientId: task.client_id });
+        const media = task.payload?.media || null;
         const message = createMessage({
           id: `task-${task.id}`,
           externalId: payload.result?.messageId || null,
@@ -125,11 +126,13 @@ export function createHub(httpServer) {
           chatId: mappedContact?.chat_id || payload.result?.chatId || null,
           sender: task.client_id,
           recipient: task.target_phone,
-          body: task.payload?.body || "",
-          messageType: "text",
+          body: task.payload?.body || media?.originalName || media?.filename || "",
+          messageType: media ? "media" : "text",
           payload: {
             taskId: task.id,
             result: payload.result || null,
+            media,
+            caption: task.payload?.body || "",
             recipientPhone: task.target_phone,
             contact: mappedContact?.contact_payload || null,
             metadata: task.payload?.metadata || {}

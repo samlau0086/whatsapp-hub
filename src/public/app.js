@@ -292,6 +292,18 @@ function sortMessagesOldestFirst(messages) {
   return [...messages].sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
 }
 
+function messageDisplayBody(message) {
+  const media = message.payload?.media;
+  if (message.message_type === "media" || media) {
+    return [
+      "[media]",
+      media?.originalName || media?.filename || "",
+      message.body || message.payload?.caption || ""
+    ].filter(Boolean).join(" ");
+  }
+  return message.body || "";
+}
+
 function render() {
   const onlineCount = state.clients.filter((client) => client.status === "online").length;
   const runningCount = state.tasks.filter((task) => task.status === "running").length;
@@ -361,7 +373,7 @@ function render() {
 
   $("chat-messages").innerHTML = activeChatMessages.length ? activeChatMessages.map((message) => `
     <article class="chat-bubble ${escapeHtml(message.direction || "inbound")}">
-      <p>${escapeHtml(message.body || "")}</p>
+      <p>${escapeHtml(messageDisplayBody(message))}</p>
       <span>${escapeHtml(message.sender || "-")} / ${escapeHtml(fmt(message.created_at))}</span>
     </article>
   `).join("") : `<div class="empty-state">${escapeHtml(t("selectChat"))}</div>`;
@@ -393,9 +405,9 @@ function render() {
     <article class="message">
       <header>
         <span class="message-source" title="${escapeHtml(message.sender || "")}">${escapeHtml(message.sender || "-")}</span>
-        <span class="soft-pill">${escapeHtml(message.direction || "inbound")}</span>
+        <span class="soft-pill">${escapeHtml(message.direction || "inbound")} / ${escapeHtml(message.message_type || "text")}</span>
       </header>
-      <p>${escapeHtml(message.body || "")}</p>
+      <p>${escapeHtml(messageDisplayBody(message))}</p>
       <div class="message-meta">
         <span>${escapeHtml(t("clientLabel", { value: message.client_id }))}</span>
         <span>${escapeHtml(t("chatLabel", { value: message.conversation_key || message.contact_phone || message.chat_id || "-" }))}</span>
