@@ -1097,6 +1097,9 @@ CLIENT_PROXY_URL=
 CLIENT_PROXY_USERNAME=
 CLIENT_PROXY_PASSWORD=
 PUPPETEER_HEADLESS=false
+HISTORY_SYNC_ON_READY=true
+HISTORY_SYNC_CHAT_LIMIT=50
+HISTORY_SYNC_MESSAGE_LIMIT=30
 ```
 
 字段说明：
@@ -1111,6 +1114,11 @@ PUPPETEER_HEADLESS=false
 - `CLIENT_PROXY_USERNAME`: 代理用户名，没有认证可留空。
 - `CLIENT_PROXY_PASSWORD`: 代理密码，没有认证可留空。
 - `PUPPETEER_HEADLESS`: 首次调试建议 `false`，稳定后可改为 `true`。
+- `HISTORY_SYNC_ON_READY`: agent 启动并 ready 后是否主动补拉最近聊天记录，建议保持 `true`。
+- `HISTORY_SYNC_CHAT_LIMIT`: 每次上线补拉最近多少个会话，默认 `50`。
+- `HISTORY_SYNC_MESSAGE_LIMIT`: 每个会话补拉最近多少条消息，默认 `30`。
+
+断线期间客户发来的消息不会实时进入 Hub。agent 重新上线后，会通过 WhatsApp Web 主动读取最近聊天记录并上报 Hub；Hub 会按 WhatsApp 消息 `external_id` 去重，所以重复补拉不会重复入库。这个机制能覆盖大多数短暂断线场景，但是否能补回所有历史，仍取决于 WhatsApp Web 当时能同步到多少历史消息。
 
 启动 agent：
 

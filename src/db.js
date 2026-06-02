@@ -513,6 +513,15 @@ export function createMessage(message) {
     created_at: message.createdAt || timestamp,
     received_at: timestamp
   };
+  if (row.external_id) {
+    const existing = db.prepare(`
+      SELECT id
+      FROM messages
+      WHERE client_id = ? AND external_id = ?
+      LIMIT 1
+    `).get(row.client_id, row.external_id);
+    if (existing) return getMessage(existing.id);
+  }
   db.prepare(`
     INSERT OR IGNORE INTO messages (id, external_id, client_id, direction, chat_id, sender, recipient, body, message_type, payload, created_at, received_at)
     VALUES (@id, @external_id, @client_id, @direction, @chat_id, @sender, @recipient, @body, @message_type, @payload, @created_at, @received_at)

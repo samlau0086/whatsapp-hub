@@ -27,7 +27,10 @@ const config = {
   proxyPassword: process.env.CLIENT_PROXY_PASSWORD || "",
   executablePath,
   qrOutputDir: path.resolve(process.env.QR_OUTPUT_DIR || "."),
-  headless: process.env.PUPPETEER_HEADLESS !== "false"
+  headless: process.env.PUPPETEER_HEADLESS !== "false",
+  historySyncOnReady: process.env.HISTORY_SYNC_ON_READY !== "false",
+  historySyncChatLimit: numberFromEnv("HISTORY_SYNC_CHAT_LIMIT", 50),
+  historySyncMessageLimit: numberFromEnv("HISTORY_SYNC_MESSAGE_LIMIT", 30)
 };
 
 const puppeteerArgs = ["--no-sandbox", "--disable-setuid-sandbox"];
@@ -70,6 +73,7 @@ console.log(`web cache path: ${config.cachePath}`);
 console.log(`proxy: ${config.proxyUrl || "disabled"}`);
 console.log(`browser executable: ${config.executablePath || "Puppeteer managed Chrome"}`);
 console.log(`qr image output: ${config.qrOutputDir}`);
+console.log(`history sync: ${config.historySyncOnReady ? `${config.historySyncChatLimit} chats x ${config.historySyncMessageLimit} messages` : "disabled"}`);
 
 function emitHello(status = "online") {
   socket.emit("client:hello", {
@@ -181,9 +185,14 @@ whatsapp.on("qr", async (qr) => {
   }
 });
 
-whatsapp.on("ready", () => {
+whatsapp.on("ready", async () => {
   emitHello();
   console.log(`${config.clientId} is ready`);
+  if (config.historySyncOnReady) {
+    await syncRecentMessages().catch((error) => {
+      console.error(`history sync failed: ${error.message}`);
+    });
+  }
 });
 
 whatsapp.on("authenticated", () => {
@@ -195,34 +204,39 @@ whatsapp.on("disconnected", (reason) => {
 });
 
 whatsapp.on("message", async (message) => {
-  const contact = await resolveMessageContact(message);
-  const contactInfo = serializeContact(contact);
-  const senderId = message.author || message.from;
-  const senderPhone = contactInfo?.number || contactInfo?.phone || null;
-  socket.emit("message:created", {
-    clientId: config.clientId,
-    externalId: message.id?._serialized,
-    direction: message.fromMe ? "outbound" : "inbound",
-    chatId: message.from,
-    sender: senderPhone || senderId,
-    recipient: message.to,
-    body: message.body,
-    messageType: message.type,
-    createdAt: message.timestamp ? new Date(message.timestamp * 1000).toISOString() : new Date().toISOString(),
-    payload: {
-      from: message.from,
-      to: message.to,
-      author: message.author,
-      senderId,
-      senderPhone,
-      contact: contactInfo,
-      hasMedia: message.hasMedia,
-      type: message.type
-    }
-  });
+  await emitHubMessage(message, "message");
+});
+
+whatsapp.on("message_create", async (message) => {
+  if (!message.fromMe) return;
+  await emitHubMessage(message, "message_create");
 });
 
 whatsapp.initialize();
+
+async function syncRecentMessages() {
+  console.log("starting history sync");
+  const chats = await whatsapp.getChats();
+  const recentChats = chats
+    .filter((chat) => chat?.id?._serialized)
+    .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+    .slice(0, config.historySyncChatLimit);
+  let synced = 0;
+
+  for (const chat of recentChats) {
+    try {
+      const messages = await chat.fetchMessages({ limit: config.historySyncMessageLimit });
+      for (const message of messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))) {
+        await emitHubMessage(message, "history_sync");
+        synced += 1;
+      }
+    } catch (error) {
+      console.error(`failed to sync chat ${chat.id?._serialized || "unknown"}: ${error.message}`);
+    }
+  }
+
+  console.log(`history sync completed: ${synced} messages from ${recentChats.length} chats`);
+}
 
 function safeFileName(value) {
   return String(value || "client").replace(/[^a-zA-Z0-9_.-]/g, "-");
@@ -236,12 +250,60 @@ function normalizeChatId(value) {
   return `${digits}@c.us`;
 }
 
+function numberFromEnv(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 async function resolveMessageContact(message) {
+  const contactId = message.fromMe ? message.to : (message.author || message.from);
+  if (contactId) {
+    try {
+      return await whatsapp.getContactById(contactId);
+    } catch {
+      // Fall through to the message helper. Some group and newsletter ids do not
+      // resolve cleanly through getContactById.
+    }
+  }
   try {
     return await message.getContact();
   } catch {
     return null;
   }
+}
+
+async function emitHubMessage(message, source) {
+  const contact = await resolveMessageContact(message);
+  const contactInfo = serializeContact(contact);
+  const direction = message.fromMe ? "outbound" : "inbound";
+  const chatId = message.fromMe ? message.to : message.from;
+  const peerId = message.fromMe ? message.to : (message.author || message.from);
+  const peerPhone = contactInfo?.number || contactInfo?.phone || null;
+  const ownPhone = whatsapp.info?.wid?.user || null;
+
+  socket.emit("message:created", {
+    clientId: config.clientId,
+    externalId: message.id?._serialized,
+    direction,
+    chatId,
+    sender: message.fromMe ? (ownPhone || message.from) : (peerPhone || peerId),
+    recipient: message.fromMe ? (peerPhone || message.to) : (ownPhone || message.to),
+    body: message.body,
+    messageType: message.type,
+    createdAt: message.timestamp ? new Date(message.timestamp * 1000).toISOString() : new Date().toISOString(),
+    payload: {
+      from: message.from,
+      to: message.to,
+      author: message.author,
+      source,
+      senderId: message.fromMe ? (whatsapp.info?.wid?._serialized || message.from) : peerId,
+      senderPhone: message.fromMe ? ownPhone : peerPhone,
+      recipientPhone: message.fromMe ? peerPhone : ownPhone,
+      contact: contactInfo,
+      hasMedia: message.hasMedia,
+      type: message.type
+    }
+  });
 }
 
 function serializeContact(contact) {

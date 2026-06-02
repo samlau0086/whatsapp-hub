@@ -743,7 +743,10 @@ function buildClientDeployment(clientConfig, token, fallbackHubUrl = config.publ
     ["PUPPETEER_CACHE_DIR", "./.puppeteer-cache"],
     ["PUPPETEER_EXECUTABLE_PATH", ""],
     ["QR_OUTPUT_DIR", "."],
-    ["PUPPETEER_HEADLESS", resolved.headless ? "true" : "false"]
+    ["PUPPETEER_HEADLESS", resolved.headless ? "true" : "false"],
+    ["HISTORY_SYNC_ON_READY", "true"],
+    ["HISTORY_SYNC_CHAT_LIMIT", "50"],
+    ["HISTORY_SYNC_MESSAGE_LIMIT", "30"]
   ].map(([key, value]) => `${key}=${quoteEnv(value)}`).join("\n");
 
   const agentBaseUrl = new URL("/agent/", resolved.hubUrl).toString();
