@@ -161,6 +161,7 @@ CREATE INDEX IF NOT EXISTS idx_contact_mappings_chat ON contact_mappings(client_
 
 ensureColumn("client_configs", "agent_token", "TEXT");
 migrateContactMappingsToAliases();
+repairContactMappingAliases();
 
 const now = () => new Date().toISOString();
 const json = (value) => JSON.stringify(value === undefined ? {} : value);
@@ -695,6 +696,20 @@ export function getContactMappingByChatId({ clientId, chatId }) {
   `).get({ clientId, chatId }));
 }
 
+export function getPreferredContactMappingForChatId({ clientId, chatId }) {
+  if (!clientId || !chatId) return null;
+  return mapContactMapping(db.prepare(`
+    SELECT *
+    FROM contact_mappings
+    WHERE client_id = @clientId
+      AND stripChatIdServer(chat_id) = stripChatIdServer(@chatId)
+    ORDER BY
+      CASE WHEN phone != stripChatIdServer(@chatId) THEN 0 ELSE 1 END,
+      last_seen_at DESC
+    LIMIT 1
+  `).get({ clientId, chatId }));
+}
+
 export function findLastOutboundClientForTarget(targetPhone) {
   const phone = normalizePhone(targetPhone);
   if (!phone) return null;
@@ -748,7 +763,8 @@ export function upsertContactMapping({ phone, clientId, chatId, contact = {} }) 
   const timestamp = now();
   const existing = getContactMappingByChatId({ clientId, chatId });
   const isManual = contact?.source === "manual";
-  const nextPhone = existing && !isManual ? existing.phone : normalized;
+  const sibling = existing || getPreferredContactMappingForChatId({ clientId, chatId });
+  const nextPhone = sibling && !isManual ? sibling.phone : normalized;
   const row = {
     id: randomUUID(),
     phone: nextPhone,
@@ -763,15 +779,29 @@ export function upsertContactMapping({ phone, clientId, chatId, contact = {} }) 
     updated_at: timestamp,
     last_seen_at: timestamp
   };
-  db.prepare(`
-    INSERT INTO contact_mappings (id, phone, client_id, chat_id, contact_payload, created_at, updated_at, last_seen_at)
-    VALUES (@id, @phone, @client_id, @chat_id, @contact_payload, @created_at, @updated_at, @last_seen_at)
-    ON CONFLICT(client_id, chat_id) DO UPDATE SET
-      phone = excluded.phone,
-      contact_payload = excluded.contact_payload,
-      updated_at = excluded.updated_at,
-      last_seen_at = excluded.last_seen_at
-  `).run(row);
+  db.transaction(() => {
+    db.prepare(`
+      INSERT INTO contact_mappings (id, phone, client_id, chat_id, contact_payload, created_at, updated_at, last_seen_at)
+      VALUES (@id, @phone, @client_id, @chat_id, @contact_payload, @created_at, @updated_at, @last_seen_at)
+      ON CONFLICT(client_id, chat_id) DO UPDATE SET
+        phone = excluded.phone,
+        contact_payload = excluded.contact_payload,
+        updated_at = excluded.updated_at,
+        last_seen_at = excluded.last_seen_at
+    `).run(row);
+
+    if (isManual) {
+      db.prepare(`
+        UPDATE contact_mappings
+        SET phone = @phone,
+            contact_payload = @contact_payload,
+            updated_at = @updated_at,
+            last_seen_at = @last_seen_at
+        WHERE client_id = @client_id
+          AND stripChatIdServer(chat_id) = stripChatIdServer(@chat_id)
+      `).run(row);
+    }
+  })();
   return getContactMappingByChatId({ clientId, chatId });
 }
 
@@ -866,6 +896,10 @@ function contactPhoneSql(alias) {
       )
     ORDER BY
       CASE
+        WHEN cm.phone != stripChatIdServer(${alias}.chat_id) THEN 0
+        ELSE 1
+      END,
+      CASE
         WHEN cm.chat_id = ${alias}.chat_id THEN 0
         WHEN stripChatIdServer(cm.chat_id) = stripChatIdServer(${alias}.chat_id) THEN 1
         ELSE 2
@@ -910,6 +944,30 @@ function migrateContactMappingsToAliases() {
     db.prepare("CREATE INDEX IF NOT EXISTS idx_contact_mappings_phone ON contact_mappings(phone)").run();
     db.prepare("CREATE INDEX IF NOT EXISTS idx_contact_mappings_chat ON contact_mappings(client_id, chat_id)").run();
   })();
+}
+
+function repairContactMappingAliases() {
+  db.prepare(`
+    UPDATE contact_mappings
+    SET phone = (
+      SELECT preferred.phone
+      FROM contact_mappings preferred
+      WHERE preferred.client_id = contact_mappings.client_id
+        AND stripChatIdServer(preferred.chat_id) = stripChatIdServer(contact_mappings.chat_id)
+        AND preferred.phone != stripChatIdServer(preferred.chat_id)
+      ORDER BY preferred.last_seen_at DESC
+      LIMIT 1
+    ),
+    updated_at = @timestamp
+    WHERE phone = stripChatIdServer(chat_id)
+      AND EXISTS (
+        SELECT 1
+        FROM contact_mappings preferred
+        WHERE preferred.client_id = contact_mappings.client_id
+          AND stripChatIdServer(preferred.chat_id) = stripChatIdServer(contact_mappings.chat_id)
+          AND preferred.phone != stripChatIdServer(preferred.chat_id)
+      )
+  `).run({ timestamp: new Date().toISOString() });
 }
 
 export function createUser({ username, displayName, passwordHash, role = "viewer", enabled = true }) {
