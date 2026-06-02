@@ -685,6 +685,16 @@ export function listContactMappings({ clientId, phone, limit = 100 } = {}) {
   `).all(params).map(mapContactMapping);
 }
 
+export function getContactMappingByChatId({ clientId, chatId }) {
+  if (!clientId || !chatId) return null;
+  return mapContactMapping(db.prepare(`
+    SELECT *
+    FROM contact_mappings
+    WHERE client_id = @clientId AND chat_id = @chatId
+    LIMIT 1
+  `).get({ clientId, chatId }));
+}
+
 export function findLastOutboundClientForTarget(targetPhone) {
   const phone = normalizePhone(targetPhone);
   if (!phone) return null;
@@ -736,12 +746,19 @@ export function upsertContactMapping({ phone, clientId, chatId, contact = {} }) 
   const normalized = normalizePhone(phone);
   if (!normalized || !clientId || !chatId || !String(chatId).includes("@")) return null;
   const timestamp = now();
+  const existing = getContactMappingByChatId({ clientId, chatId });
+  const isManual = contact?.source === "manual";
+  const nextPhone = existing && !isManual ? existing.phone : normalized;
   const row = {
     id: randomUUID(),
-    phone: normalized,
+    phone: nextPhone,
     client_id: clientId,
     chat_id: chatId,
-    contact_payload: json(contact),
+    contact_payload: json({
+      ...(existing && !isManual ? existing.contact_payload : {}),
+      ...contact,
+      preservedPhone: existing && !isManual && existing.phone !== normalized ? normalized : undefined
+    }),
     created_at: timestamp,
     updated_at: timestamp,
     last_seen_at: timestamp
@@ -755,7 +772,7 @@ export function upsertContactMapping({ phone, clientId, chatId, contact = {} }) 
       updated_at = excluded.updated_at,
       last_seen_at = excluded.last_seen_at
   `).run(row);
-  return resolveChatIdForPhone({ phone: normalized, clientId });
+  return getContactMappingByChatId({ clientId, chatId });
 }
 
 export function getApiRequest(id) {
