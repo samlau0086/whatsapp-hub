@@ -611,6 +611,13 @@ curl https://ws.example.com/api/auth/check \
 - 公司网络或代理阻止 WhatsApp Web。
 - 同一个 `Client ID` 被另一台电脑占用，后上线的会挤掉前一个。
 
+If the client is online for a short time and then becomes offline while the agent is still running, check these items:
+
+- Update the Hub to the latest version. The Hub now keeps a client online when the Socket.IO connection is still alive, even if a heartbeat is delayed by history sync or media download.
+- Check the Hub env value `CLIENT_OFFLINE_AFTER_MS`. The default is `45000` ms. On slow VPS/network environments, set it to `120000`.
+- Check the agent log for repeated `connect_error`, `disconnect`, proxy errors, or WhatsApp Web browser crashes.
+- When using Nginx/Caddy, make sure WebSocket upgrade headers are configured, otherwise Socket.IO may reconnect repeatedly.
+
 #### 4. 每次启动都要重新扫码
 
 通常是登录状态目录没有保留。
@@ -1823,7 +1830,7 @@ Hub:
 - `WEB_ADMIN_PASSWORD`: 首次初始化 Web 管理员密码。
 - `PUBLIC_BASE_URL`: Hub 对外访问地址，例如 `https://hub.example.com`。
 - `TRUST_PROXY`: 使用 Nginx/Caddy 等反向代理时设为 `true`。
-- `CLIENT_OFFLINE_AFTER_MS`: 心跳超时后标记离线，默认 45 秒。
+- `CLIENT_OFFLINE_AFTER_MS`: 心跳超时阈值，默认 45 秒。Hub 会优先检查 Socket.IO 是否仍在线；如果 socket 仍连接，会刷新在线状态而不是直接标记离线。历史同步、媒体下载或慢网络环境下可调大，例如 `120000`。
 
 Agent:
 
@@ -1866,3 +1873,68 @@ Agent:
 - 支持媒体消息下载、对象存储、消息去重和重试队列。
 - 增加任务优先级、按手机号绑定固定 client、失败自动切换 client。
 - Webhook 使用 HMAC 签名替代当前简单 shared secret header。
+## Optimization Roadmap
+
+### Data Reliability
+
+- Move production storage from SQLite to PostgreSQL or MySQL for stronger concurrency, backups, and future multi-Hub deployment.
+- Add automatic scheduled database backups, upload backups to remote object storage, and expose backup status in the Web UI.
+- Add a contact mapping audit log so every `chatId -> phone` change records source, operator, previous value, and rollback action.
+- Add a manual `Merge conversations` tool in the Web UI for cases where WhatsApp returns unstable `@lid` or internal chat IDs.
+- Add a message repair job that can backfill old media metadata from historical tasks and re-run contact mapping inference safely.
+
+### Client Stability
+
+- Add per-client health metrics: heartbeat latency, socket reconnect count, WhatsApp ready state, QR/auth state, browser process state, and last media sync error.
+- Add alerting when a client repeatedly flips online/offline or has queued tasks for too long.
+- Add configurable history sync throttling so slow machines can limit chats/messages/media downloaded per minute.
+- Add a client-side watchdog script or service mode for Windows to restart the agent if Node/Chrome crashes.
+- Add a safer deployment/update command for client agents that updates files without deleting auth/cache/session directories.
+
+### Routing And Scheduling
+
+- Add routing policies: sticky client by target phone, weighted random, priority clients, business-hour routing, and fallback client groups.
+- Add task priority, retry policy, retry delay, and max attempts per API token or per business application.
+- Add manual task reassignment history and reason codes.
+- Add rate limits per client and per target phone to reduce WhatsApp Web risk.
+- Add a dry-run route preview API that explains which client would be selected before creating a send task.
+
+### Media And Message Handling
+
+- Store inbound and outbound media in object storage such as S3/R2/MinIO instead of local disk.
+- Add media retention policies by MIME type, size, client, and business application.
+- Generate image thumbnails and video poster frames for faster Web UI previews.
+- Support optional OCR/transcription pipelines for images, PDFs, audio, and voice notes.
+- Add media download retry queue for WhatsApp media that is temporarily unavailable during history sync.
+
+### API And Webhooks
+
+- Add webhook HMAC signatures, replay protection, and per-webhook delivery logs.
+- Add webhook retry policy with exponential backoff and dead-letter status.
+- Add cursor-based pagination for messages, tasks, API requests, and chats.
+- Add API idempotency keys for send-message requests.
+- Add OpenAPI/Swagger documentation generated from the actual routes.
+
+### Web Console
+
+- Add a dedicated conversation mapping management page with search, merge, split, lock, and rollback actions.
+- Add advanced filters for messages by phone, client, media type, direction, date range, and task id.
+- Add role-scoped dashboards so operators only see assigned clients or business groups.
+- Add downloadable CSV/JSON exports for messages, tasks, API requests, mappings, and clients.
+- Add realtime notification badges for failed tasks, offline clients, and webhook failures.
+
+### Security And Compliance
+
+- Encrypt sensitive token values and proxy credentials at rest.
+- Add API token expiration dates, rotation reminders, and last-used IP/device audit.
+- Add optional IP allowlists per API token.
+- Add data retention controls for messages, media, API logs, and audit logs.
+- Add admin action audit logs for user, role, token, client, mapping, and webhook changes.
+
+### Deployment And Operations
+
+- Add a one-command VPS diagnostics script that checks Docker, Compose, Nginx, ports, env, volume mounts, database path, and container health.
+- Add a migration framework for database schema changes instead of inline startup migrations.
+- Add staged deploy/rollback support in GitHub Actions.
+- Add healthcheck endpoints for Hub, database, uploads, Socket.IO, and webhook workers.
+- Add Prometheus metrics or lightweight `/admin/api/metrics` for operational monitoring.
