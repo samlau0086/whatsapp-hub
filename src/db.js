@@ -732,6 +732,7 @@ export function getPreferredContactMappingForChatId({ clientId, chatId }) {
     WHERE client_id = @clientId
       AND stripChatIdServer(chat_id) = stripChatIdServer(@chatId)
     ORDER BY
+      CASE WHEN contact_payload LIKE '%"source":"manual"%' OR contact_payload LIKE '%"source": "manual"%' THEN 0 ELSE 1 END,
       CASE WHEN phone != stripChatIdServer(@chatId) THEN 0 ELSE 1 END,
       last_seen_at DESC
     LIMIT 1
@@ -790,19 +791,32 @@ export function upsertContactMapping({ phone, clientId, chatId, contact = {} }) 
   if (!normalized || !clientId || !chatId || !String(chatId).includes("@")) return null;
   const timestamp = now();
   const existing = getContactMappingByChatId({ clientId, chatId });
-  const isAuthoritative = ["manual", "task", "task_recovery"].includes(contact?.source);
+  const incomingSource = contact?.source || "auto";
+  const incomingPriority = contactMappingPriority(incomingSource);
+  const existingPriority = contactMappingPriority(existing);
   const sibling = existing || getPreferredContactMappingForChatId({ clientId, chatId });
-  const nextPhone = sibling && !isAuthoritative ? sibling.phone : normalized;
+  const siblingPriority = contactMappingPriority(sibling);
+  const preserveExisting = existing && existingPriority > incomingPriority;
+  const preserveSibling = !existing && sibling && siblingPriority >= incomingPriority;
+  const nextPhone = preserveExisting ? existing.phone : (preserveSibling ? sibling.phone : normalized);
+  const nextPayload = preserveExisting
+    ? {
+        ...existing.contact_payload,
+        preservedPhone: existing.phone !== normalized ? normalized : existing.contact_payload?.preservedPhone,
+        ignoredSource: incomingSource
+      }
+    : {
+        ...(preserveSibling ? sibling.contact_payload : {}),
+        ...contact,
+        source: incomingSource,
+        preservedPhone: preserveSibling && sibling.phone !== normalized ? normalized : undefined
+      };
   const row = {
     id: randomUUID(),
     phone: nextPhone,
     client_id: clientId,
     chat_id: chatId,
-    contact_payload: json({
-      ...(existing && !isAuthoritative ? existing.contact_payload : {}),
-      ...contact,
-      preservedPhone: existing && !isAuthoritative && existing.phone !== normalized ? normalized : undefined
-    }),
+    contact_payload: json(nextPayload),
     created_at: timestamp,
     updated_at: timestamp,
     last_seen_at: timestamp
@@ -818,7 +832,7 @@ export function upsertContactMapping({ phone, clientId, chatId, contact = {} }) 
         last_seen_at = excluded.last_seen_at
     `).run(row);
 
-    if (isAuthoritative) {
+    if (incomingSource === "manual") {
       db.prepare(`
         UPDATE contact_mappings
         SET phone = @phone,
@@ -889,6 +903,16 @@ function upsertContactMappingFromMessage(row, payload) {
     chatId: row.chat_id,
     contact
   });
+}
+
+function contactMappingPriority(mappingOrSource) {
+  const source = typeof mappingOrSource === "string"
+    ? mappingOrSource
+    : mappingOrSource?.contact_payload?.source;
+  if (source === "manual") return 100;
+  if (source === "task" || source === "task_recovery") return 50;
+  if (source === "auto_resolve") return 30;
+  return 10;
 }
 
 function upsertContactMappingFromTask(task) {
