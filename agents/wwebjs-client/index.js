@@ -155,6 +155,38 @@ async function downloadMedia(mediaPayload) {
   return filePath;
 }
 
+async function uploadInboundMedia(message, source) {
+  if (!message.hasMedia) return null;
+  try {
+    const media = await message.downloadMedia();
+    if (!media?.data || !media?.mimetype) return null;
+    const bytes = Buffer.from(media.data, "base64");
+    const fileName = media.filename
+      || message._data?.filename
+      || `whatsapp-${message.id?.id || Date.now()}${extensionFromMime(media.mimetype)}`;
+    const form = new FormData();
+    form.append("file", new Blob([bytes], { type: media.mimetype }), fileName);
+    const response = await fetch(new URL("/api/uploads", config.hubUrl), {
+      method: "POST",
+      headers: { "x-hub-token": config.token },
+      body: form
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `upload failed with ${response.status}`);
+    return {
+      ...body.file,
+      filename: fileName,
+      originalName: body.file?.originalName || fileName,
+      mimeType: body.file?.mimeType || media.mimetype,
+      source,
+      whatsappMessageId: message.id?._serialized || null
+    };
+  } catch (error) {
+    console.error(`failed to upload inbound media ${message.id?._serialized || ""}: ${error.message}`);
+    return null;
+  }
+}
+
 setInterval(() => {
   if (socket.connected) {
     socket.emit("client:heartbeat", {
@@ -275,6 +307,7 @@ async function resolveMessageContact(message) {
 async function emitHubMessage(message, source) {
   const contact = await resolveMessageContact(message);
   const contactInfo = serializeContact(contact);
+  const media = await uploadInboundMedia(message, source);
   const direction = message.fromMe ? "outbound" : "inbound";
   const chatId = message.fromMe ? message.to : message.from;
   const peerId = message.fromMe ? message.to : (message.author || message.from);
@@ -288,8 +321,8 @@ async function emitHubMessage(message, source) {
     chatId,
     sender: message.fromMe ? (ownPhone || message.from) : (peerPhone || peerId),
     recipient: message.fromMe ? (peerPhone || message.to) : (ownPhone || message.to),
-    body: message.body,
-    messageType: message.type,
+    body: message.body || media?.originalName || "",
+    messageType: media ? "media" : message.type,
     createdAt: message.timestamp ? new Date(message.timestamp * 1000).toISOString() : new Date().toISOString(),
     payload: {
       from: message.from,
@@ -300,10 +333,27 @@ async function emitHubMessage(message, source) {
       senderPhone: message.fromMe ? ownPhone : peerPhone,
       recipientPhone: message.fromMe ? peerPhone : ownPhone,
       contact: contactInfo,
+      media,
+      caption: message.body || "",
       hasMedia: message.hasMedia,
       type: message.type
     }
   });
+}
+
+function extensionFromMime(mimeType) {
+  const map = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "audio/mpeg": ".mp3",
+    "audio/ogg": ".ogg",
+    "application/pdf": ".pdf"
+  };
+  return map[mimeType] || "";
 }
 
 function serializeContact(contact) {

@@ -521,12 +521,35 @@ export function createMessage(message) {
   };
   if (row.external_id) {
     const existing = db.prepare(`
-      SELECT id
+      SELECT id, payload, message_type, body
       FROM messages
       WHERE client_id = ? AND external_id = ?
       LIMIT 1
     `).get(row.client_id, row.external_id);
-    if (existing) return getMessage(existing.id);
+    if (existing) {
+      const existingPayload = parseJson(existing.payload);
+      const nextPayload = parseJson(row.payload);
+      if (nextPayload?.media && !existingPayload?.media) {
+        const mergedPayload = {
+          ...existingPayload,
+          ...nextPayload,
+          media: nextPayload.media
+        };
+        db.prepare(`
+          UPDATE messages
+          SET body = @body,
+              message_type = @message_type,
+              payload = @payload
+          WHERE id = @id
+        `).run({
+          id: existing.id,
+          body: row.body || existing.body || nextPayload.media.originalName || "",
+          message_type: "media",
+          payload: json(mergedPayload)
+        });
+      }
+      return getMessage(existing.id);
+    }
   }
   db.prepare(`
     INSERT OR IGNORE INTO messages (id, external_id, client_id, direction, chat_id, sender, recipient, body, message_type, payload, created_at, received_at)

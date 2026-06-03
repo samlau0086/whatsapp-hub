@@ -84,7 +84,7 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, "public"), { index: false }));
 app.use("/uploads", (req, res, next) => {
   const token = getApiTokenFromRequest(req);
-  if (authenticateApiToken(token, "uploads:create") || req.header("cookie")) return next();
+  if (authenticateApiToken(token, "uploads:create") || authenticateApiToken(token, "messages:read") || req.header("cookie")) return next();
   return res.status(401).send("unauthorized");
 }, express.static(path.resolve(config.uploadDir)));
 

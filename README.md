@@ -809,7 +809,7 @@ WEB_ADMIN_PASSWORD=replace-with-a-long-random-admin-password
 - `tasks:read`: 查询任务。
 - `tasks:send`: 创建发送任务。
 - `tasks:assign`: 手动改派任务。
-- `messages:read`: 查询消息和 chats。
+- `messages:read`: 查询消息和 chats，也可下载消息里的 `/uploads/...` 媒体附件。
 - `requests:read`: 查询 API 请求记录。
 - `webhooks:manage`: 管理 webhooks。
 - `uploads:create`: 上传媒体附件。
@@ -1376,6 +1376,22 @@ curl -X POST https://hub.example.com/api/tasks/send-message \
   -d "{\"clientId\":\"office-pc-01\",\"to\":\"447856364969\",\"body\":\"please check this file\",\"media\":{\"url\":\"/uploads/f3a1d28db4d94b6b9e9c0f0b4e5a7d23\",\"originalName\":\"invoice.pdf\",\"mimeType\":\"application/pdf\",\"sendAsDocument\":true}}"
 ```
 
+Media API notes:
+
+- `media.url` is normally a relative URL such as `/uploads/f3a1d28db4d94b6b9e9c0f0b4e5a7d23`.
+- External systems should build the absolute URL with the Hub host, for example `https://hub.example.com/uploads/f3a1d28db4d94b6b9e9c0f0b4e5a7d23`.
+- Downloading `/uploads/...` requires a web session cookie, or an API token with `messages:read` or `uploads:create`.
+- Inbound WhatsApp media messages use the same `payload.media` shape after the client agent downloads and uploads the file to Hub.
+
+Download example:
+
+```bash
+curl -L \
+  -H "x-hub-token: replace-with-a-long-random-token" \
+  -o invoice.pdf \
+  "https://hub.example.com/uploads/f3a1d28db4d94b6b9e9c0f0b4e5a7d23"
+```
+
 `sendAsDocument=true` 适合 PDF、压缩包、表格等文件；图片和视频可以传 `false` 或省略。
 
 ### 查询 Clients
@@ -1509,10 +1525,20 @@ curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com
       "conversation_id": "447856364969",
       "sender": "447856364969",
       "recipient": "8618682188709@c.us",
-      "body": "hi",
-      "message_type": "chat",
+      "body": "photo from customer",
+      "message_type": "media",
       "payload": {
         "senderPhone": "447856364969",
+        "caption": "photo from customer",
+        "media": {
+          "id": "f3a1d28db4d94b6b9e9c0f0b4e5a7d23",
+          "originalName": "whatsapp-abc123.jpg",
+          "mimeType": "image/jpeg",
+          "size": 245760,
+          "url": "/uploads/f3a1d28db4d94b6b9e9c0f0b4e5a7d23",
+          "source": "message",
+          "whatsappMessageId": "false_88399604142300@lid_123456"
+        },
         "contact": {
           "id": "88399604142300@lid",
           "number": "447856364969"
@@ -1726,7 +1752,15 @@ curl -X DELETE -H "x-hub-token: replace-with-a-long-random-token" https://hub.ex
   "data": {
     "client_id": "office-pc-01",
     "conversation_key": "447856364969",
-    "body": "hello"
+    "body": "photo from customer",
+    "message_type": "media",
+    "payload": {
+      "media": {
+        "originalName": "whatsapp-abc123.jpg",
+        "mimeType": "image/jpeg",
+        "url": "/uploads/f3a1d28db4d94b6b9e9c0f0b4e5a7d23"
+      }
+    }
   },
   "sentAt": "2026-06-01T10:05:00.000Z"
 }
