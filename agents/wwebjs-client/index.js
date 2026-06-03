@@ -157,6 +157,7 @@ async function downloadMedia(mediaPayload) {
 
 async function uploadInboundMedia(message, source) {
   if (!message.hasMedia) return null;
+  if (!isDownloadableMessageMedia(message)) return null;
   try {
     const media = await message.downloadMedia();
     if (!media?.data || !media?.mimetype) return null;
@@ -182,7 +183,11 @@ async function uploadInboundMedia(message, source) {
       whatsappMessageId: message.id?._serialized || null
     };
   } catch (error) {
-    console.error(`failed to upload inbound media ${message.id?._serialized || ""}: ${error.message}`);
+    if (isUnsupportedMediaError(error)) {
+      console.warn(`skipped unsupported inbound media ${message.id?._serialized || ""}: ${message.type || "unknown"}`);
+    } else {
+      console.error(`failed to upload inbound media ${message.id?._serialized || ""}: ${error.message}`);
+    }
     return null;
   }
 }
@@ -354,6 +359,24 @@ function extensionFromMime(mimeType) {
     "application/pdf": ".pdf"
   };
   return map[mimeType] || "";
+}
+
+function isDownloadableMessageMedia(message) {
+  const downloadableTypes = new Set([
+    "image",
+    "video",
+    "audio",
+    "ptt",
+    "document",
+    "sticker"
+  ]);
+  if (downloadableTypes.has(message.type)) return true;
+  const mimeType = message._data?.mimetype;
+  return Boolean(mimeType && message.type !== "interactive");
+}
+
+function isUnsupportedMediaError(error) {
+  return /webMediaType is invalid|media.*invalid|unsupported/i.test(error?.message || "");
 }
 
 function serializeContact(contact) {
