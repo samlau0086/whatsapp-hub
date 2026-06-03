@@ -99,6 +99,8 @@ export function createHub(httpServer) {
       if (socket.data.kind !== "agent") return ack?.({ ok: false, error: "forbidden" });
       const clientId = payload.clientId || socket.data.clientId;
       if (!clientId) return ack?.({ ok: false, error: "client id required" });
+      const client = touchClient(clientId, "online");
+      if (client) io.emit("client:updated", client);
       const message = createMessage({ ...payload, clientId });
       io.emit("message:created", message);
       await dispatchWebhook("message.created", message);
@@ -112,6 +114,8 @@ export function createHub(httpServer) {
       if (socket.data.kind !== "agent") return ack?.({ ok: false, error: "forbidden" });
       const task = getTask(payload.taskId);
       if (!task) return ack?.({ ok: false, error: "task not found" });
+      const client = task.client_id ? touchClient(task.client_id, "online") : null;
+      if (client) io.emit("client:updated", client);
       const status = payload.ok ? "succeeded" : "failed";
       const updated = updateTask(payload.taskId, {
         status,
@@ -166,9 +170,15 @@ export function createHub(httpServer) {
     const cutoff = Date.now() - config.clientOfflineAfterMs;
     for (const client of listOnlineClients()) {
       if (!client.last_seen_at || new Date(client.last_seen_at).getTime() < cutoff) {
-        socketsByClient.delete(client.id);
-        const updated = setClientStatus(client.id, "offline");
-        io.emit("client:updated", updated);
+        const socket = peekLiveClientSocket(client.id);
+        if (socket) {
+          const updated = touchClient(client.id, "online");
+          io.emit("client:updated", updated);
+        } else {
+          socketsByClient.delete(client.id);
+          const updated = setClientStatus(client.id, "offline");
+          io.emit("client:updated", updated);
+        }
       }
     }
   }, 15_000).unref();
@@ -283,8 +293,7 @@ export function reconcileClientPresence() {
 
 function getLiveClientSocket(clientId) {
   if (!activeIo) return null;
-  const socketId = socketsByClient.get(clientId);
-  const socket = socketId && activeIo.sockets.sockets.get(socketId);
+  const socket = peekLiveClientSocket(clientId);
   if (!socket || !socket.connected || socket.data.kind !== "agent") {
     socketsByClient.delete(clientId);
     const stale = getClient(clientId);
@@ -295,6 +304,13 @@ function getLiveClientSocket(clientId) {
     return null;
   }
   return socket;
+}
+
+function peekLiveClientSocket(clientId) {
+  if (!activeIo) return null;
+  const socketId = socketsByClient.get(clientId);
+  const socket = socketId && activeIo.sockets.sockets.get(socketId);
+  return socket?.connected && socket.data.kind === "agent" ? socket : null;
 }
 
 async function failTask(io, task, error) {
