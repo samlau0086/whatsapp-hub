@@ -901,7 +901,10 @@ function upsertContactMappingFromMessage(row, payload) {
     phone,
     clientId: row.client_id,
     chatId: row.chat_id,
-    contact
+    contact: {
+      ...contact,
+      source: contact?.source || "message"
+    }
   });
 }
 
@@ -963,13 +966,27 @@ function contactPhoneSql(alias) {
         AND (
           cm.chat_id = ${alias}.chat_id
           OR stripChatIdServer(cm.chat_id) = stripChatIdServer(${alias}.chat_id)
-          OR cm.phone = digitsOnly(${alias}.sender)
-          OR cm.phone = digitsOnly(${alias}.recipient)
-          OR cm.phone = jsonPhone(${alias}.payload, 'senderPhone')
-          OR cm.phone = jsonPhone(${alias}.payload, 'recipientPhone')
-          OR cm.phone = jsonContactPhone(${alias}.payload)
+        )
+        AND (
+          cm.contact_payload LIKE '%"source":"manual"%'
+          OR cm.contact_payload LIKE '%"source": "manual"%'
+          OR cm.contact_payload LIKE '%"source":"task"%'
+          OR cm.contact_payload LIKE '%"source": "task"%'
+          OR cm.contact_payload LIKE '%"source":"auto_resolve"%'
+          OR cm.contact_payload LIKE '%"source": "auto_resolve"%'
+          OR cm.phone = CASE
+            WHEN ${alias}.direction = 'outbound' THEN NULLIF(jsonPhone(${alias}.payload, 'recipientPhone'), '')
+            ELSE NULLIF(jsonPhone(${alias}.payload, 'senderPhone'), '')
+          END
+          OR cm.phone = NULLIF(jsonContactPhone(${alias}.payload), '')
         )
       ORDER BY
+        CASE
+          WHEN cm.contact_payload LIKE '%"source":"manual"%' OR cm.contact_payload LIKE '%"source": "manual"%' THEN 0
+          WHEN cm.contact_payload LIKE '%"source":"task"%' OR cm.contact_payload LIKE '%"source": "task"%' THEN 1
+          WHEN cm.contact_payload LIKE '%"source":"auto_resolve"%' OR cm.contact_payload LIKE '%"source": "auto_resolve"%' THEN 2
+          ELSE 3
+        END,
         CASE
           WHEN cm.phone != stripChatIdServer(${alias}.chat_id) THEN 0
           ELSE 1
@@ -988,19 +1005,19 @@ function contactPhoneSql(alias) {
       WHERE tasks.client_id = ${alias}.client_id
         AND tasks.type = 'send-message'
         AND digitsOnly(tasks.target_phone) != ''
-        AND (
-          tasks.payload LIKE '%' || ${alias}.chat_id || '%'
-          OR tasks.payload LIKE '%' || stripChatIdServer(${alias}.chat_id) || '%'
-          OR digitsOnly(tasks.target_phone) = stripChatIdServer(${alias}.chat_id)
-          OR digitsOnly(tasks.target_phone) = digitsOnly(${alias}.sender)
-          OR digitsOnly(tasks.target_phone) = digitsOnly(${alias}.recipient)
-        )
+        AND tasks.payload LIKE '%' || ${alias}.chat_id || '%'
       ORDER BY tasks.created_at DESC
       LIMIT 1
     ),
-    NULLIF(jsonPhone(${alias}.payload, 'recipientPhone'), ''),
-    NULLIF(jsonPhone(${alias}.payload, 'senderPhone'), ''),
-    NULLIF(jsonContactPhone(${alias}.payload), '')
+    CASE
+      WHEN ${alias}.direction = 'outbound' THEN NULLIF(jsonPhone(${alias}.payload, 'recipientPhone'), '')
+      ELSE NULLIF(jsonPhone(${alias}.payload, 'senderPhone'), '')
+    END,
+    NULLIF(jsonContactPhone(${alias}.payload), ''),
+    CASE
+      WHEN ${alias}.direction = 'outbound' THEN NULLIF(digitsOnly(${alias}.recipient), '')
+      ELSE NULLIF(digitsOnly(${alias}.sender), '')
+    END
   )`;
 }
 
