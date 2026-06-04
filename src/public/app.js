@@ -292,6 +292,10 @@ function sortMessagesOldestFirst(messages) {
   return [...messages].sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
 }
 
+function sortChatsNewestFirst(chats) {
+  return [...chats].sort((a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0));
+}
+
 function messageDisplayBody(message) {
   const media = message.payload?.media;
   if (message.message_type === "media" || media) {
@@ -346,6 +350,7 @@ function render() {
   const visibleClients = filteredClients();
   const tasks = scopedTasks();
   const messages = scopedMessages();
+  const visibleChats = sortChatsNewestFirst(state.chats);
   const activeChatMessages = state.selectedChatId || state.selectedConversationKey
     ? sortMessagesOldestFirst(dedupeMessages(state.messages.filter((message) => messageMatchesActiveChat(message, activeChat))))
     : [];
@@ -397,7 +402,7 @@ function render() {
     .join("");
   $("send-client").value = activeClient?.status === "online" ? activeClient.id : "";
 
-  $("chat-list").innerHTML = state.chats.length ? state.chats.map((chat) => `
+  $("chat-list").innerHTML = visibleChats.length ? visibleChats.map((chat) => `
     <article class="chat-item ${chatConversationKey(chat) === state.selectedConversationKey ? "active" : ""}" data-chat-id="${escapeHtml(chat.chat_id)}" data-conversation-key="${escapeHtml(chatConversationKey(chat))}">
       <strong>${escapeHtml(chat.conversation_key || chat.contact_phone || chat.chat_id)}</strong>
       <span>${escapeHtml(chat.last_body || "")}</span>
