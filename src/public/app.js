@@ -342,6 +342,74 @@ function renderMessageContent(message) {
   `;
 }
 
+function compactText(value, maxLength = 360) {
+  const text = String(value || "").trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
+}
+
+function compactJson(value) {
+  if (!value) return "";
+  if (typeof value === "string") return compactText(value);
+  try {
+    return compactText(JSON.stringify(value));
+  } catch {
+    return compactText(String(value));
+  }
+}
+
+function taskFailureText(task) {
+  const result = task.result && typeof task.result === "object" ? task.result : {};
+  return compactText(task.error || result.error || result.reason || result.message || "");
+}
+
+function taskResultText(task) {
+  const result = task.result && typeof task.result === "object" ? task.result : {};
+  const payload = task.payload && typeof task.payload === "object" ? task.payload : {};
+  const parts = [];
+  if (result.messageId) parts.push(`messageId: ${result.messageId}`);
+  if (result.id) parts.push(`id: ${result.id}`);
+  if (result.chatId) parts.push(`chatId: ${result.chatId}`);
+  if (result.recipient) parts.push(`recipient: ${result.recipient}`);
+  if (payload.targetChatId) parts.push(`targetChatId: ${payload.targetChatId}`);
+  if (payload.media?.originalName || payload.media?.filename) {
+    parts.push(`media: ${payload.media.originalName || payload.media.filename}`);
+  }
+  if (payload.routing?.reason) parts.push(`route: ${payload.routing.reason}`);
+  const fallback = compactJson(result);
+  return compactText(parts.join(" / ") || fallback);
+}
+
+function renderTaskDetails(task) {
+  const failure = taskFailureText(task);
+  const result = taskResultText(task);
+  const blocks = [];
+  if (task.status === "failed") {
+    blocks.push(`
+      <div class="task-detail task-detail-error">
+        <strong>Failure reason</strong>
+        <span>${escapeHtml(failure || "No detailed error was returned by the client agent.")}</span>
+      </div>
+    `);
+  } else if (failure) {
+    blocks.push(`
+      <div class="task-detail task-detail-error">
+        <strong>Error</strong>
+        <span>${escapeHtml(failure)}</span>
+      </div>
+    `);
+  }
+  if (result && result !== failure) {
+    blocks.push(`
+      <div class="task-detail ${task.status === "completed" ? "task-detail-success" : "task-detail-info"}">
+        <strong>Result details</strong>
+        <span>${escapeHtml(result)}</span>
+      </div>
+    `);
+  }
+  return blocks.join("");
+}
+
 function render() {
   const onlineCount = state.clients.filter((client) => client.status === "online").length;
   const runningCount = state.tasks.filter((task) => task.status === "running").length;
@@ -429,6 +497,7 @@ function render() {
         <span>${escapeHtml(t("toLabel", { value: task.target_phone || "-" }))}</span>
         <span title="${escapeHtml(fmt(task.updated_at))}">${relativeTime(task.updated_at)}</span>
       </div>
+      ${renderTaskDetails(task)}
       ${can("tasks:send") ? `
         <div class="task-reassign">
           <select data-assign-select="${escapeHtml(task.id)}">

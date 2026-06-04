@@ -709,7 +709,7 @@ flowchart LR
 
 - 动态注册、删除、查看 WhatsApp clients。
 - 根据在线状态调度指定 client 或随机在线 client。
-- 发送消息任务状态：`queued`、`running`、`succeeded`、`failed`。
+- 发送消息任务状态：`queued`、`running`、`succeeded`、`failed`，失败任务会保存并展示 `error` / `result` 详情。
 - client 收到消息后上报 hub，支持按 client、sender、chat 查询消息历史。
 - 记录 API 请求历史，包括路径、状态码、来源 IP、耗时和脱敏后的请求体。
 - Webhook 推送 `message.created` 和 `task.updated`。
@@ -1339,6 +1339,13 @@ curl -X POST https://hub.example.com/api/tasks/send-message \
 }
 ```
 
+说明：
+
+- `status` 表示任务当前状态，刚创建时可能是 `queued` 或 `running`。
+- `result` 是 client agent 回传的执行结果。发送成功后通常会包含 WhatsApp message id、chatId、recipient 等信息。
+- `error` 是失败原因。发送失败、client 断线、WhatsApp Web 抛错、媒体下载失败、派发超时等情况会尽量写入这里。
+- Web 后台的 Task Timeline 会直接显示 `Failure reason` 和 `Result details`。如果旧任务或异常断线场景没有回传详细错误，界面会显示 `No detailed error was returned by the client agent.`。
+
 常见错误：
 
 ```json
@@ -1463,6 +1470,46 @@ curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/
 - `running`: 已下发给 client。
 - `succeeded`: client 返回发送成功。
 - `failed`: client 返回失败或派发超时。
+
+失败任务响应示例：
+
+```json
+{
+  "task": {
+    "id": "cf1ea3ce-4d65-4a9a-9b70-9cf7967f8e71",
+    "type": "send-message",
+    "status": "failed",
+    "client_id": "office-pc-01",
+    "target_phone": "447856364969",
+    "payload": {
+      "to": "447856364969",
+      "body": "hey",
+      "routing": {
+        "reason": "sticky-client"
+      }
+    },
+    "result": {
+      "error": "Evaluation failed: Error: wid error: invalid wid"
+    },
+    "error": "Evaluation failed: Error: wid error: invalid wid",
+    "created_at": "2026-06-01T10:00:00.000Z",
+    "updated_at": "2026-06-01T10:00:12.000Z",
+    "completed_at": "2026-06-01T10:00:12.000Z"
+  }
+}
+```
+
+### 发送失败排查
+
+如果 Web 后台只看到任务是 `failed`，请按下面顺序查：
+
+1. 打开 Web 后台 `Task Timeline`，查看任务卡片里的 `Failure reason`。
+2. 调用 `GET /api/tasks/<task-id>`，查看返回里的 `error` 和 `result`。
+3. 如果 `error` 为空，说明 client agent 没有把详细错误回传给 Hub，常见原因是 agent 进程崩溃、Socket.IO 断开、电脑休眠、Chrome/WhatsApp Web 被关闭。
+4. 到运行该 client 的内网电脑查看 agent 终端日志，重点找 `task failed`、`send failed`、`Evaluation failed`、`ProtocolError`、`Could not find Chrome`、`connect_error` 等关键字。
+5. 如果错误包含 `invalid wid`、`not a valid WhatsApp ID` 或发送后客户收不到，优先检查手机号和 `chatId -> phone` 映射是否正确。
+6. 如果错误和媒体相关，检查 `/uploads/...` 是否可被该 client 下载，以及 token 是否有 `uploads:create` 或对应 agent 权限。
+7. 修正后可以在 Web 后台把任务手动 `Assign` 给在线 client，或重新调用发送接口创建新任务。
 
 ### 手动改派任务
 

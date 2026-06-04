@@ -915,6 +915,46 @@ p {
   font-size: 12px;
 }
 
+.task-detail {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+}
+
+.task-detail strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.task-detail span {
+  color: var(--muted);
+}
+
+.task-detail-error {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.task-detail-error strong,
+.task-detail-error span {
+  color: var(--red);
+}
+
+.task-detail-success {
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.28);
+}
+
+.task-detail-info {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.28);
+}
+
 .task-reassign {
   display: grid;
   gap: 8px;
