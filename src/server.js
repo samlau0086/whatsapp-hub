@@ -69,6 +69,21 @@ const hub = createHub(server);
 fs.mkdirSync(config.uploadDir, { recursive: true });
 const upload = multer({ dest: config.uploadDir, limits: { fileSize: 50 * 1024 * 1024 } });
 
+process.on("unhandledRejection", (reason) => {
+  console.error("[process] unhandled promise rejection", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[process] uncaught exception", error);
+});
+
+server.on("error", (error) => {
+  console.error(`[startup] HTTP server failed on PORT=${config.port}: ${error.message}`);
+  if (error.code === "EADDRINUSE") {
+    console.error(`[startup] PORT=${config.port} is already in use inside the container. Change PORT or stop the conflicting process.`);
+  }
+});
+
 if (config.trustProxy) {
   app.set("trust proxy", 1);
 }
@@ -431,7 +446,12 @@ app.use("/api", (req, res, next) => {
 });
 
 app.get("/health", (req, res) => {
-  res.json({ ok: true, service: "whatsapp-actor-hub", time: new Date().toISOString() });
+  res.json({
+    ok: true,
+    service: "whatsapp-actor-hub",
+    time: new Date().toISOString(),
+    diagnostics: runtimeDiagnostics()
+  });
 });
 
 app.get("/api/auth/check", (req, res) => {
@@ -1098,4 +1118,77 @@ function dispatchTaskInBackground(task) {
 
 server.listen(config.port, () => {
   console.log(`whatsapp actor hub listening on ${config.publicBaseUrl}`);
+  logStartupDiagnostics();
 });
+
+function logStartupDiagnostics() {
+  const diagnostics = runtimeDiagnostics();
+  console.log("[startup] diagnostics", JSON.stringify(diagnostics));
+  console.log(`[startup] container health check: curl -i http://127.0.0.1:${config.port}/health`);
+  if (process.env.HOST_PORT) {
+    console.log(`[startup] VPS host-port health check: curl -i http://127.0.0.1:${process.env.HOST_PORT}/health`);
+  }
+  if (config.publicBaseUrl && !/localhost|127\.0\.0\.1/.test(config.publicBaseUrl)) {
+    console.log(`[startup] public health check: curl -i ${config.publicBaseUrl.replace(/\/$/, "")}/health`);
+    console.log("[startup] if local health works but public URL fails, check Nginx/Caddy proxy_pass, HTTPS certificate, DNS, firewall, or Cloudflare settings.");
+  }
+  if (process.env.HOST_PORT && process.env.HOST_PORT !== String(config.port)) {
+    console.log(`[startup] reminder: Docker maps HOST_PORT=${process.env.HOST_PORT} on the VPS to container PORT=${config.port}; reverse proxy should point to 127.0.0.1:${process.env.HOST_PORT}.`);
+  }
+}
+
+function runtimeDiagnostics() {
+  return {
+    node: process.version,
+    uptimeSeconds: Math.round(process.uptime()),
+    port: config.port,
+    publicBaseUrl: config.publicBaseUrl,
+    trustProxy: config.trustProxy,
+    database: fileDiagnostics(config.databasePath),
+    uploads: directoryDiagnostics(config.uploadDir),
+    env: {
+      hostBindAddress: process.env.HOST_BIND_ADDRESS || null,
+      hostPort: process.env.HOST_PORT || null,
+      clientOfflineAfterMs: config.clientOfflineAfterMs
+    }
+  };
+}
+
+function fileDiagnostics(filePath) {
+  const resolved = path.resolve(filePath);
+  try {
+    const stat = fs.statSync(resolved);
+    return {
+      path: resolved,
+      exists: true,
+      size: stat.size,
+      modifiedAt: stat.mtime.toISOString(),
+      directoryWritable: isWritable(path.dirname(resolved))
+    };
+  } catch (error) {
+    return {
+      path: resolved,
+      exists: false,
+      error: error.message,
+      directoryWritable: isWritable(path.dirname(resolved))
+    };
+  }
+}
+
+function directoryDiagnostics(dirPath) {
+  const resolved = path.resolve(dirPath);
+  return {
+    path: resolved,
+    exists: fs.existsSync(resolved),
+    writable: isWritable(resolved)
+  };
+}
+
+function isWritable(targetPath) {
+  try {
+    fs.accessSync(targetPath, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
