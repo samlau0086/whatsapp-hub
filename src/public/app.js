@@ -18,6 +18,7 @@ const state = {
   editingClientConfigId: "",
   socket: null,
   refreshTimer: null,
+  chatRefreshTimer: null,
   refreshInProgress: false,
   clientFilter: "all",
   selectedClientId: "",
@@ -955,7 +956,7 @@ function connectSocket() {
   state.socket.on("message:created", (message) => {
     if (!can("messages:read")) return;
     state.messages = dedupeMessages([message, ...state.messages.filter((item) => item.id !== message.id && item.payload?.taskId !== message.payload?.taskId)]).slice(0, 300);
-    if (message.client_id === state.selectedClientId) refreshChats().catch(() => {});
+    if (message.client_id === state.selectedClientId) scheduleChatRefresh();
     render();
   });
   state.socket.on("contact:mapping-updated", (mapping) => {
@@ -978,6 +979,17 @@ async function refreshChats(clientId = state.selectedClientId) {
   if (clientId !== state.selectedClientId) return;
   state.chats = result.chats;
   syncSelectedChat();
+}
+
+function scheduleChatRefresh() {
+  if (state.chatLoading || !state.selectedClientId) return;
+  if (state.chatRefreshTimer) window.clearTimeout(state.chatRefreshTimer);
+  state.chatRefreshTimer = window.setTimeout(() => {
+    state.chatRefreshTimer = null;
+    refreshChats()
+      .then(render)
+      .catch(() => {});
+  }, 1200);
 }
 
 async function loadActiveChatMessages() {

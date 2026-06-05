@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_client_created ON messages(client_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_client_chat_created ON messages(client_id, chat_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tasks_client_created ON tasks(client_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS webhooks (
@@ -640,57 +641,52 @@ export function listMessages({ clientId, sender, chatId, targetPhone, limit = 10
 }
 
 export function listChats({ clientId, limit = 100 } = {}) {
-  const params = { limit: Math.min(Number(limit) || 100, 500) };
-  const where = ["messages.chat_id IS NOT NULL", "messages.chat_id != ''"];
+  const finalLimit = Math.min(Number(limit) || 100, 500);
+  const scanLimit = Math.min(Math.max(finalLimit * 40, 1000), 5000);
+  const params = { scanLimit };
+  const where = ["chat_id IS NOT NULL", "chat_id != ''"];
   if (clientId) {
-    where.push("messages.client_id = @clientId");
+    where.push("client_id = @clientId");
     params.clientId = clientId;
   }
-  return db.prepare(`
-    WITH mapped_messages AS (
-      SELECT messages.*, ${contactPhoneSql("messages")} AS contact_phone
-      FROM messages
-      WHERE ${where.join(" AND ")}
-    )
-    SELECT
-      COALESCE(contact_phone, chat_id) AS conversation_id,
-      COALESCE(contact_phone, chat_id) AS conversation_key,
-      contact_phone,
-      COALESCE(
-        (
-          SELECT cm.chat_id
-          FROM contact_mappings cm
-          WHERE cm.client_id = mapped_messages.client_id
-            AND cm.phone = mapped_messages.contact_phone
-          ORDER BY cm.last_seen_at DESC
-          LIMIT 1
-        ),
-        chat_id
-      ) AS chat_id,
-      client_id,
-      MAX(created_at) AS last_message_at,
-      COUNT(*) AS message_count,
-      (
-        SELECT body
-        FROM mapped_messages m2
-        WHERE m2.client_id = mapped_messages.client_id
-          AND COALESCE(m2.contact_phone, m2.chat_id) = COALESCE(mapped_messages.contact_phone, mapped_messages.chat_id)
-        ORDER BY m2.created_at DESC
-        LIMIT 1
-      ) AS last_body,
-      (
-        SELECT sender
-        FROM mapped_messages m2
-        WHERE m2.client_id = mapped_messages.client_id
-          AND COALESCE(m2.contact_phone, m2.chat_id) = COALESCE(mapped_messages.contact_phone, mapped_messages.chat_id)
-        ORDER BY m2.created_at DESC
-        LIMIT 1
-      ) AS last_sender
-    FROM mapped_messages
-    GROUP BY client_id, COALESCE(contact_phone, chat_id)
-    ORDER BY last_message_at DESC
-    LIMIT @limit
+  const rows = db.prepare(`
+    SELECT *
+    FROM messages
+    WHERE ${where.join(" AND ")}
+    ORDER BY created_at DESC
+    LIMIT @scanLimit
   `).all(params);
+  const mappings = listContactMappingsForChatList(clientId || null);
+  const conversations = new Map();
+
+  for (const row of rows) {
+    const payload = parseJson(row.payload);
+    const contactPhone = fastContactPhone(row, payload, mappings);
+    const conversationKey = contactPhone || row.chat_id;
+    const mapKey = `${row.client_id}:${conversationKey}`;
+    const current = conversations.get(mapKey);
+    if (current) {
+      current.message_count += 1;
+      continue;
+    }
+    const preferredChatId = contactPhone
+      ? mappings.byPhone.get(`${row.client_id}:${contactPhone}`)?.chat_id || row.chat_id
+      : row.chat_id;
+    conversations.set(mapKey, {
+      conversation_id: conversationKey,
+      conversation_key: conversationKey,
+      contact_phone: contactPhone,
+      chat_id: preferredChatId,
+      client_id: row.client_id,
+      last_message_at: row.created_at,
+      message_count: 1,
+      last_body: row.body || "",
+      last_sender: row.sender || null
+    });
+    if (conversations.size >= finalLimit) break;
+  }
+
+  return Array.from(conversations.values());
 }
 
 export function listContactMappings({ clientId, phone, limit = 100 } = {}) {
@@ -955,6 +951,50 @@ function listChatIdsForPhone(phone, clientId) {
       last_seen_at DESC
     LIMIT 50
   `).all(params).map((row) => row.chat_id);
+}
+
+function listContactMappingsForChatList(clientId) {
+  const where = [];
+  const params = {};
+  if (clientId) {
+    where.push("client_id = @clientId");
+    params.clientId = clientId;
+  }
+  const rows = db.prepare(`
+    SELECT *
+    FROM contact_mappings
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    ORDER BY last_seen_at DESC
+    LIMIT 5000
+  `).all(params).map(mapContactMapping);
+  const exact = new Map();
+  const stripped = new Map();
+  const byPhone = new Map();
+  for (const mapping of rows) {
+    const exactKey = `${mapping.client_id}:${mapping.chat_id}`;
+    const strippedKey = `${mapping.client_id}:${stripChatIdServer(mapping.chat_id)}`;
+    const phoneKey = `${mapping.client_id}:${mapping.phone}`;
+    if (!exact.has(exactKey)) exact.set(exactKey, mapping);
+    if (!stripped.has(strippedKey)) stripped.set(strippedKey, mapping);
+    if (!byPhone.has(phoneKey)) byPhone.set(phoneKey, mapping);
+  }
+  return { exact, stripped, byPhone };
+}
+
+function fastContactPhone(row, payload, mappings) {
+  const exact = mappings.exact.get(`${row.client_id}:${row.chat_id}`);
+  if (exact) return exact.phone;
+  const stripped = mappings.stripped.get(`${row.client_id}:${stripChatIdServer(row.chat_id)}`);
+  if (stripped) return stripped.phone;
+  const contact = payload?.contact || {};
+  const candidates = row.direction === "outbound"
+    ? [payload?.recipientPhone, contact.number, row.recipient]
+    : [payload?.senderPhone, contact.number, row.sender];
+  return candidates.map(normalizePhone).find(Boolean) || null;
+}
+
+function stripChatIdServer(value) {
+  return String(value || "").split("@")[0];
 }
 
 function contactPhoneSql(alias) {
