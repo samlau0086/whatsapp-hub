@@ -5,6 +5,7 @@ const state = {
   roles: {},
   clients: [],
   tasks: [],
+  pinnedTaskIds: new Set(),
   messages: [],
   chats: [],
   apiRequests: [],
@@ -222,7 +223,8 @@ function filteredClients() {
 }
 
 function scopedTasks() {
-  return state.selectedClientId ? state.tasks.filter((task) => task.client_id === state.selectedClientId) : state.tasks;
+  if (!state.selectedClientId) return state.tasks;
+  return state.tasks.filter((task) => task.client_id === state.selectedClientId || state.pinnedTaskIds.has(task.id));
 }
 
 function scopedMessages() {
@@ -294,6 +296,30 @@ function mergeMessages(incoming, limit = 300) {
     ...(incoming || []),
     ...state.messages
   ]).slice(0, limit);
+}
+
+function rememberTask(task) {
+  if (!task?.id) return;
+  state.pinnedTaskIds.add(task.id);
+  state.tasks = [task, ...state.tasks.filter((item) => item.id !== task.id)].slice(0, 50);
+  prunePinnedTasks();
+}
+
+function mergeTasks(incoming, limit = 50) {
+  const pinnedTasks = state.tasks.filter((task) => state.pinnedTaskIds.has(task.id));
+  const merged = [
+    ...(incoming || []),
+    ...pinnedTasks
+  ].filter((task, index, list) => task?.id && list.findIndex((item) => item.id === task.id) === index);
+  state.tasks = merged.slice(0, limit);
+  prunePinnedTasks();
+}
+
+function prunePinnedTasks() {
+  const visibleTaskIds = new Set(state.tasks.map((item) => item.id));
+  for (const id of state.pinnedTaskIds) {
+    if (!visibleTaskIds.has(id)) state.pinnedTaskIds.delete(id);
+  }
 }
 
 function sortMessagesOldestFirst(messages) {
@@ -863,7 +889,7 @@ async function refreshHubState() {
       can("clients:read") ? api("/admin/api/client-configs") : Promise.resolve({ clientConfigs: [] })
     ]);
     state.clients = clients.clients;
-    state.tasks = tasks.tasks;
+    mergeTasks(tasks.tasks);
     state.messages = mergeMessages(messages.messages);
     state.chats = chats.chats;
     syncSelectedChat();
@@ -906,7 +932,7 @@ function connectSocket() {
   });
   state.socket.on("task:updated", (task) => {
     if (!can("tasks:read")) return;
-    state.tasks = [task, ...state.tasks.filter((item) => item.id !== task.id)].slice(0, 50);
+    rememberTask(task);
     render();
   });
   state.socket.on("message:created", (message) => {
@@ -1319,9 +1345,9 @@ function bindEvents() {
         body,
         media
       })
-    })
+      })
       .then(({ task }) => {
-        state.tasks = [task, ...state.tasks.filter((item) => item.id !== task.id)].slice(0, 50);
+        rememberTask(task);
         state.messages = [optimisticChatMessage({ task, body, media, phone }), ...state.messages].slice(0, 200);
         $("chat-send-body").value = "";
         $("chat-file").value = "";
@@ -1357,7 +1383,7 @@ function bindEvents() {
       body: JSON.stringify({ clientId })
     })
       .then(({ task }) => {
-        state.tasks = [task, ...state.tasks.filter((item) => item.id !== task.id)].slice(0, 50);
+        rememberTask(task);
         showToast("Task assigned");
         render();
       })
@@ -1383,7 +1409,7 @@ function bindEvents() {
     };
     await api("/admin/api/tasks/send-message", { method: "POST", body: JSON.stringify(payload) })
       .then(({ task }) => {
-        state.tasks = [task, ...state.tasks.filter((item) => item.id !== task.id)];
+        rememberTask(task);
         $("send-body").value = "";
         showToast(t("taskDispatched"));
         render();
