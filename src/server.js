@@ -293,13 +293,13 @@ app.patch("/admin/api/tasks/:id/assign", requireWebSession, requirePermission("t
   if (!getClient(clientId)) return res.status(404).json({ error: "client not found" });
   const task = assignTask(req.params.id, clientId);
   if (!task) return res.status(404).json({ error: "task not found" });
-  const dispatched = await hub.dispatchTask(task);
-  res.json({ task: dispatched });
+  dispatchTaskInBackground(task);
+  res.json({ task });
 });
 
 app.post("/admin/api/tasks/send-message", requireWebSession, requirePermission("tasks:send"), async (req, res) => {
-  const dispatched = await createAndDispatchMessageTask(req, res);
-  if (dispatched) res.status(202).json({ task: dispatched });
+  const task = createAndDispatchMessageTask(req, res);
+  if (task) res.status(202).json({ task });
 });
 
 app.post("/admin/api/uploads", requireWebSession, requirePermission("tasks:send"), upload.single("file"), (req, res) => {
@@ -568,8 +568,8 @@ app.post("/api/uploads", upload.single("file"), (req, res) => {
 
 app.post("/api/tasks/send-message", async (req, res) => {
   if (!hasApiPermission(req, "tasks:send")) return res.status(403).json({ error: "forbidden" });
-  const dispatched = await createAndDispatchMessageTask(req, res);
-  if (dispatched) res.status(202).json({ task: dispatched });
+  const task = createAndDispatchMessageTask(req, res);
+  if (task) res.status(202).json({ task });
 });
 
 app.get("/api/tasks", (req, res) => {
@@ -591,8 +591,8 @@ app.patch("/api/tasks/:id/assign", async (req, res) => {
   if (!getClient(clientId)) return res.status(404).json({ error: "client not found" });
   const task = assignTask(req.params.id, clientId);
   if (!task) return res.status(404).json({ error: "task not found" });
-  const dispatched = await hub.dispatchTask(task);
-  res.json({ task: dispatched });
+  dispatchTaskInBackground(task);
+  res.json({ task });
 });
 
 app.get("/api/webhooks", (req, res) => {
@@ -1047,7 +1047,7 @@ function powershellEncodedWriteEnv(env) {
   return Buffer.from(script, "utf16le").toString("base64");
 }
 
-async function createAndDispatchMessageTask(req, res) {
+function createAndDispatchMessageTask(req, res) {
   const { clientId, to, chatId, body, metadata, media } = req.body || {};
   const target = to || chatId;
   if (!target || (!body && !media)) {
@@ -1084,7 +1084,16 @@ async function createAndDispatchMessageTask(req, res) {
       }
     }
   });
-  return hub.dispatchTask(task);
+  dispatchTaskInBackground(task);
+  return task;
+}
+
+function dispatchTaskInBackground(task) {
+  setImmediate(() => {
+    hub.dispatchTask(task).catch((error) => {
+      console.error(`failed to dispatch task ${task.id}`, error);
+    });
+  });
 }
 
 server.listen(config.port, () => {

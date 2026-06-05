@@ -17,6 +17,7 @@ const state = {
   editingClientConfigId: "",
   socket: null,
   refreshTimer: null,
+  refreshInProgress: false,
   clientFilter: "all",
   selectedClientId: "",
   selectedChatId: "",
@@ -286,6 +287,13 @@ function dedupeMessages(messages) {
     seen.add(key);
     return true;
   });
+}
+
+function mergeMessages(incoming, limit = 300) {
+  return dedupeMessages([
+    ...(incoming || []),
+    ...state.messages
+  ]).slice(0, limit);
 }
 
 function sortMessagesOldestFirst(messages) {
@@ -843,22 +851,28 @@ async function load() {
 }
 
 async function refreshHubState() {
-  const [clients, tasks, messages, chats, requests, clientConfigs] = await Promise.all([
-    can("clients:read") ? api("/admin/api/clients") : Promise.resolve({ clients: [] }),
-    can("tasks:read") ? api("/admin/api/tasks?limit=50") : Promise.resolve({ tasks: [] }),
-    can("messages:read") ? api("/admin/api/messages?limit=50") : Promise.resolve({ messages: [] }),
-    can("messages:read") && state.selectedClientId ? api(`/admin/api/chats?clientId=${encodeURIComponent(state.selectedClientId)}&limit=100`) : Promise.resolve({ chats: [] }),
-    can("requests:read") ? api("/admin/api/requests?limit=50") : Promise.resolve({ requests: [] }),
-    can("clients:read") ? api("/admin/api/client-configs") : Promise.resolve({ clientConfigs: [] })
-  ]);
-  state.clients = clients.clients;
-  state.tasks = tasks.tasks;
-  state.messages = dedupeMessages(messages.messages);
-  state.chats = chats.chats;
-  syncSelectedChat();
-  state.apiRequests = requests.requests;
-  state.clientConfigs = clientConfigs.clientConfigs;
-  render();
+  if (state.refreshInProgress) return;
+  state.refreshInProgress = true;
+  try {
+    const [clients, tasks, messages, chats, requests, clientConfigs] = await Promise.all([
+      can("clients:read") ? api("/admin/api/clients") : Promise.resolve({ clients: [] }),
+      can("tasks:read") ? api("/admin/api/tasks?limit=50") : Promise.resolve({ tasks: [] }),
+      can("messages:read") ? api("/admin/api/messages?limit=50") : Promise.resolve({ messages: [] }),
+      can("messages:read") && state.selectedClientId ? api(`/admin/api/chats?clientId=${encodeURIComponent(state.selectedClientId)}&limit=100`) : Promise.resolve({ chats: [] }),
+      can("requests:read") ? api("/admin/api/requests?limit=50") : Promise.resolve({ requests: [] }),
+      can("clients:read") ? api("/admin/api/client-configs") : Promise.resolve({ clientConfigs: [] })
+    ]);
+    state.clients = clients.clients;
+    state.tasks = tasks.tasks;
+    state.messages = mergeMessages(messages.messages);
+    state.chats = chats.chats;
+    syncSelectedChat();
+    state.apiRequests = requests.requests;
+    state.clientConfigs = clientConfigs.clientConfigs;
+    render();
+  } finally {
+    state.refreshInProgress = false;
+  }
 }
 
 function scheduleStateRefresh() {
@@ -867,7 +881,7 @@ function scheduleStateRefresh() {
     if (document.visibilityState === "visible") {
       refreshHubState().catch(() => {});
     }
-  }, 10_000);
+  }, 30_000);
 }
 
 function connectSocket() {
@@ -897,8 +911,8 @@ function connectSocket() {
   });
   state.socket.on("message:created", (message) => {
     if (!can("messages:read")) return;
-    state.messages = dedupeMessages([message, ...state.messages.filter((item) => item.id !== message.id && item.payload?.taskId !== message.payload?.taskId)]).slice(0, 50);
-    if (message.client_id === state.selectedClientId) refreshChats();
+    state.messages = dedupeMessages([message, ...state.messages.filter((item) => item.id !== message.id && item.payload?.taskId !== message.payload?.taskId)]).slice(0, 300);
+    if (message.client_id === state.selectedClientId) refreshChats().catch(() => {});
     render();
   });
   state.socket.on("contact:mapping-updated", (mapping) => {
@@ -939,8 +953,6 @@ function syncSelectedChat() {
   if (!state.selectedConversationKey && !state.selectedChatId) return;
   const chat = selectedChat();
   if (!chat) {
-    state.selectedChatId = "";
-    state.selectedConversationKey = "";
     state.editingChatMapping = false;
     return;
   }
