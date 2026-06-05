@@ -68,6 +68,13 @@ const server = http.createServer(app);
 const hub = createHub(server);
 fs.mkdirSync(config.uploadDir, { recursive: true });
 const upload = multer({ dest: config.uploadDir, limits: { fileSize: 50 * 1024 * 1024 } });
+const slowRequestMs = Number(process.env.SLOW_REQUEST_MS || 3000);
+const eventLoopWarnMs = Number(process.env.EVENT_LOOP_WARN_MS || 1500);
+const eventLoopState = {
+  lastLagMs: 0,
+  maxLagMs: 0,
+  warnings: 0
+};
 
 process.on("unhandledRejection", (reason) => {
   console.error("[process] unhandled promise rejection", reason);
@@ -90,6 +97,16 @@ if (config.trustProxy) {
 
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+  res.on("finish", () => {
+    const durationMs = Date.now() - startedAt;
+    if (durationMs >= slowRequestMs) {
+      console.warn(`[perf] slow request ${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs}ms`);
+    }
+  });
+  next();
+});
 app.use((req, res, next) => {
   if (["/", "/login", "/app.js", "/styles.css"].includes(req.path) || req.path.startsWith("/admin/api/") || req.path.startsWith("/api/")) {
     res.setHeader("Cache-Control", "no-store");
@@ -451,6 +468,16 @@ app.get("/health", (req, res) => {
     service: "whatsapp-actor-hub",
     time: new Date().toISOString(),
     diagnostics: runtimeDiagnostics()
+  });
+});
+
+app.get("/health/live", (req, res) => {
+  res.json({
+    ok: true,
+    service: "whatsapp-actor-hub",
+    time: new Date().toISOString(),
+    uptimeSeconds: Math.round(process.uptime()),
+    eventLoopLagMs: eventLoopState.lastLagMs
   });
 });
 
@@ -1118,8 +1145,31 @@ function dispatchTaskInBackground(task) {
 
 server.listen(config.port, () => {
   console.log(`whatsapp actor hub listening on ${config.publicBaseUrl}`);
+  startEventLoopMonitor();
   logStartupDiagnostics();
 });
+
+function startEventLoopMonitor() {
+  let expectedAt = Date.now() + 1000;
+  setInterval(() => {
+    const now = Date.now();
+    const lagMs = Math.max(0, now - expectedAt);
+    expectedAt = now + 1000;
+    eventLoopState.lastLagMs = lagMs;
+    eventLoopState.maxLagMs = Math.max(eventLoopState.maxLagMs, lagMs);
+    if (lagMs >= eventLoopWarnMs) {
+      eventLoopState.warnings += 1;
+      const memory = process.memoryUsage();
+      console.warn("[perf] event loop lag", JSON.stringify({
+        lagMs,
+        thresholdMs: eventLoopWarnMs,
+        rssMb: Math.round(memory.rss / 1024 / 1024),
+        heapUsedMb: Math.round(memory.heapUsed / 1024 / 1024),
+        socketClients: hub.io?.engine?.clientsCount ?? null
+      }));
+    }
+  }, 1000).unref();
+}
 
 function logStartupDiagnostics() {
   const diagnostics = runtimeDiagnostics();
@@ -1146,11 +1196,31 @@ function runtimeDiagnostics() {
     trustProxy: config.trustProxy,
     database: fileDiagnostics(config.databasePath),
     uploads: directoryDiagnostics(config.uploadDir),
+    performance: {
+      eventLoopLagMs: eventLoopState.lastLagMs,
+      maxEventLoopLagMs: eventLoopState.maxLagMs,
+      eventLoopWarnings: eventLoopState.warnings,
+      socketClients: hub.io?.engine?.clientsCount ?? null,
+      memory: memoryDiagnostics(),
+      thresholds: {
+        slowRequestMs,
+        eventLoopWarnMs
+      }
+    },
     env: {
       hostBindAddress: process.env.HOST_BIND_ADDRESS || null,
       hostPort: process.env.HOST_PORT || null,
       clientOfflineAfterMs: config.clientOfflineAfterMs
     }
+  };
+}
+
+function memoryDiagnostics() {
+  const memory = process.memoryUsage();
+  return {
+    rssMb: Math.round(memory.rss / 1024 / 1024),
+    heapUsedMb: Math.round(memory.heapUsed / 1024 / 1024),
+    heapTotalMb: Math.round(memory.heapTotal / 1024 / 1024)
   };
 }
 
