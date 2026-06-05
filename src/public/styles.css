@@ -1185,6 +1185,35 @@ p {
   text-align: center;
 }
 
+.loading-state {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  min-height: 140px;
+  padding: 18px;
+  text-align: center;
+}
+
+.loading-spinner {
+  animation: spin 820ms linear infinite;
+  border: 2px solid var(--line);
+  border-top-color: var(--blue);
+  border-radius: 999px;
+  height: 18px;
+  width: 18px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .toast {
   background: var(--ink);
   border-radius: 8px;

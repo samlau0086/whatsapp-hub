@@ -23,6 +23,8 @@ const state = {
   selectedClientId: "",
   selectedChatId: "",
   selectedConversationKey: "",
+  chatLoading: false,
+  chatLoadToken: 0,
   editingChatMapping: false
 };
 
@@ -55,6 +57,7 @@ const i18n = {
     send: "Send",
     selectClient: "Select a client",
     selectChat: "Choose a client and chat",
+    loadingChats: "Loading chats...",
     noChats: "No chats for this client.",
     noChatSelected: "No chat selected",
     logout: "Logout",
@@ -115,6 +118,7 @@ const i18n = {
     send: "发送",
     selectClient: "选择客户端",
     selectChat: "请选择客户端和会话",
+    loadingChats: "正在加载会话...",
     noChats: "此客户端暂无会话。",
     noChatSelected: "未选择会话",
     logout: "退出",
@@ -444,6 +448,15 @@ function renderTaskDetails(task) {
   return blocks.join("");
 }
 
+function renderLoadingState(label) {
+  return `
+    <div class="loading-state">
+      <span class="loading-spinner" aria-hidden="true"></span>
+      <span>${escapeHtml(label)}</span>
+    </div>
+  `;
+}
+
 function render() {
   const onlineCount = state.clients.filter((client) => client.status === "online").length;
   const runningCount = state.tasks.filter((task) => task.status === "running").length;
@@ -504,20 +517,24 @@ function render() {
     .join("");
   $("send-client").value = activeClient?.status === "online" ? activeClient.id : "";
 
-  $("chat-list").innerHTML = visibleChats.length ? visibleChats.map((chat) => `
-    <article class="chat-item ${chatConversationKey(chat) === state.selectedConversationKey ? "active" : ""}" data-chat-id="${escapeHtml(chat.chat_id)}" data-conversation-key="${escapeHtml(chatConversationKey(chat))}">
-      <strong>${escapeHtml(chat.conversation_key || chat.contact_phone || chat.chat_id)}</strong>
-      <span>${escapeHtml(chat.last_body || "")}</span>
-      <span>${escapeHtml(String(chat.message_count))} messages / ${relativeTime(chat.last_message_at)}</span>
-    </article>
-  `).join("") : `<div class="empty-state">${escapeHtml(activeClient ? t("noChats") : t("selectClient"))}</div>`;
+  $("chat-list").innerHTML = state.chatLoading
+    ? renderLoadingState(t("loadingChats"))
+    : visibleChats.length ? visibleChats.map((chat) => `
+      <article class="chat-item ${chatConversationKey(chat) === state.selectedConversationKey ? "active" : ""}" data-chat-id="${escapeHtml(chat.chat_id)}" data-conversation-key="${escapeHtml(chatConversationKey(chat))}">
+        <strong>${escapeHtml(chat.conversation_key || chat.contact_phone || chat.chat_id)}</strong>
+        <span>${escapeHtml(chat.last_body || "")}</span>
+        <span>${escapeHtml(String(chat.message_count))} messages / ${relativeTime(chat.last_message_at)}</span>
+      </article>
+    `).join("") : `<div class="empty-state">${escapeHtml(activeClient ? t("noChats") : t("selectClient"))}</div>`;
 
-  $("chat-messages").innerHTML = activeChatMessages.length ? activeChatMessages.map((message) => `
-    <article class="chat-bubble ${escapeHtml(message.direction || "inbound")}">
-      ${renderMessageContent(message)}
-      <span>${escapeHtml(message.sender || "-")} / ${escapeHtml(fmt(message.created_at))}</span>
-    </article>
-  `).join("") : `<div class="empty-state">${escapeHtml(t("selectChat"))}</div>`;
+  $("chat-messages").innerHTML = state.chatLoading
+    ? renderLoadingState(t("loadingChats"))
+    : activeChatMessages.length ? activeChatMessages.map((message) => `
+      <article class="chat-bubble ${escapeHtml(message.direction || "inbound")}">
+        ${renderMessageContent(message)}
+        <span>${escapeHtml(message.sender || "-")} / ${escapeHtml(fmt(message.created_at))}</span>
+      </article>
+    `).join("") : `<div class="empty-state">${escapeHtml(t("selectChat"))}</div>`;
 
   $("tasks").innerHTML = tasks.length ? tasks.map((task) => `
     <article class="task-item">
@@ -952,12 +969,14 @@ function connectSocket() {
   });
 }
 
-async function refreshChats() {
-  if (!can("messages:read") || !state.selectedClientId) {
-    state.chats = [];
+async function refreshChats(clientId = state.selectedClientId) {
+  if (!can("messages:read") || !clientId) {
+    if (!clientId || clientId === state.selectedClientId) state.chats = [];
     return;
   }
-  state.chats = (await api(`/admin/api/chats?clientId=${encodeURIComponent(state.selectedClientId)}&limit=100`)).chats;
+  const result = await api(`/admin/api/chats?clientId=${encodeURIComponent(clientId)}&limit=100`);
+  if (clientId !== state.selectedClientId) return;
+  state.chats = result.chats;
   syncSelectedChat();
 }
 
@@ -1276,11 +1295,27 @@ function bindEvents() {
     const card = event.target.closest(".client-card");
     if (!card) return;
     const id = card.dataset.clientId;
-    state.selectedClientId = state.selectedClientId === id ? "" : id;
+    const nextClientId = state.selectedClientId === id ? "" : id;
+    const loadToken = ++state.chatLoadToken;
+    state.selectedClientId = nextClientId;
     state.selectedChatId = "";
     state.selectedConversationKey = "";
     state.editingChatMapping = false;
-    refreshChats().then(render).catch((error) => showToast(error.message));
+    state.chats = [];
+    state.chatLoading = Boolean(nextClientId);
+    render();
+    if (!nextClientId) {
+      state.chatLoading = false;
+      render();
+      return;
+    }
+    refreshChats(nextClientId)
+      .catch((error) => showToast(error.message))
+      .finally(() => {
+        if (loadToken !== state.chatLoadToken) return;
+        state.chatLoading = false;
+        render();
+      });
   });
 
   $("chat-list").addEventListener("click", async (event) => {
