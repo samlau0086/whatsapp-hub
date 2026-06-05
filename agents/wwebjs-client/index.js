@@ -44,6 +44,10 @@ const socket = io(config.hubUrl, {
   reconnectionDelayMax: 10_000
 });
 
+let whatsappReady = false;
+let restartTimer = null;
+let restartInProgress = false;
+
 const whatsapp = new Client({
   authStrategy: new LocalAuth({
     clientId: config.clientId,
@@ -105,6 +109,9 @@ socket.on("connect_error", (error) => {
 socket.on("task:send-message", async (task, ack) => {
   ack?.({ accepted: true });
   try {
+    if (!whatsappReady) {
+      throw new Error("WhatsApp client is not ready yet");
+    }
     const { to, chatId: payloadChatId, body } = task.payload;
     const chatId = normalizeChatId(payloadChatId || to);
     const mediaPayload = task.payload.media;
@@ -124,10 +131,21 @@ socket.on("task:send-message", async (task, ack) => {
       }
     });
   } catch (error) {
+    const recoverableBrowserError = isRecoverableBrowserContextError(error);
+    if (recoverableBrowserError) {
+      scheduleWhatsAppRestart(error.message);
+    }
     socket.emit("task:result", {
       taskId: task.id,
       ok: false,
-      error: error.message
+      error: recoverableBrowserError
+        ? `${error.message}. WhatsApp Web browser context was detached; client restart has been scheduled.`
+        : error.message,
+      result: recoverableBrowserError ? {
+        code: "browser_context_detached",
+        recoverable: true,
+        restartScheduled: true
+      } : null
     });
   }
 });
@@ -208,6 +226,7 @@ setInterval(() => {
 }, 15_000).unref();
 
 whatsapp.on("qr", async (qr) => {
+  whatsappReady = false;
   qrcodeTerminal.generate(qr, { small: true });
   try {
     await fsp.mkdir(config.qrOutputDir, { recursive: true });
@@ -223,6 +242,7 @@ whatsapp.on("qr", async (qr) => {
 });
 
 whatsapp.on("ready", async () => {
+  whatsappReady = true;
   emitHello();
   console.log(`${config.clientId} is ready`);
   if (config.historySyncOnReady) {
@@ -237,6 +257,7 @@ whatsapp.on("authenticated", () => {
 });
 
 whatsapp.on("disconnected", (reason) => {
+  whatsappReady = false;
   socket.emit("client:heartbeat", { id: config.clientId, status: "offline", reason });
 });
 
@@ -250,6 +271,40 @@ whatsapp.on("message_create", async (message) => {
 });
 
 whatsapp.initialize();
+
+function scheduleWhatsAppRestart(reason) {
+  if (restartTimer || restartInProgress) return;
+  console.warn(`scheduling WhatsApp client restart: ${reason}`);
+  whatsappReady = false;
+  socket.emit("client:heartbeat", {
+    id: config.clientId,
+    status: "offline",
+    reason: `browser restart scheduled: ${reason}`
+  });
+  restartTimer = setTimeout(() => {
+    restartTimer = null;
+    restartWhatsAppClient(reason).catch((error) => {
+      console.error(`failed to restart WhatsApp client: ${error.message}`);
+      scheduleWhatsAppRestart(error.message);
+    });
+  }, 2_000);
+}
+
+async function restartWhatsAppClient(reason) {
+  if (restartInProgress) return;
+  restartInProgress = true;
+  whatsappReady = false;
+  console.warn(`restarting WhatsApp client: ${reason}`);
+  try {
+    await whatsapp.destroy().catch((error) => {
+      console.warn(`failed to destroy existing WhatsApp client cleanly: ${error.message}`);
+    });
+    await wait(3_000);
+    await whatsapp.initialize();
+  } finally {
+    restartInProgress = false;
+  }
+}
 
 async function syncRecentMessages() {
   console.log("starting history sync");
@@ -377,6 +432,14 @@ function isDownloadableMessageMedia(message) {
 
 function isUnsupportedMediaError(error) {
   return /webMediaType is invalid|media.*invalid|unsupported/i.test(error?.message || "");
+}
+
+function isRecoverableBrowserContextError(error) {
+  return /detached Frame|Execution context was destroyed|Cannot find context with specified id|Target closed|Session closed|Protocol error/i.test(error?.message || "");
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function serializeContact(contact) {

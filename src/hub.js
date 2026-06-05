@@ -116,6 +116,17 @@ export function createHub(httpServer) {
       if (!task) return ack?.({ ok: false, error: "task not found" });
       const client = task.client_id ? touchClient(task.client_id, "online") : null;
       if (client) io.emit("client:updated", client);
+      if (!payload.ok && payload.result?.recoverable && payload.result?.restartScheduled) {
+        const queued = updateTask(payload.taskId, {
+          status: "queued",
+          result: payload.result,
+          error: payload.error || "recoverable client browser error; waiting for client restart",
+          completedAt: null
+        });
+        io.emit("task:updated", queued);
+        await dispatchWebhook("task.updated", queued);
+        return ack?.({ ok: true, task: queued });
+      }
       const status = payload.ok ? "succeeded" : "failed";
       const updated = updateTask(payload.taskId, {
         status,
