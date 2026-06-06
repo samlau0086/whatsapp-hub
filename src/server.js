@@ -54,6 +54,7 @@ import {
   revokeApiToken,
   setClientStatus,
   touchApiToken,
+  updateTask,
   updateApiToken,
   updateClientConfig,
   updateClientConfigAgentToken,
@@ -326,6 +327,12 @@ app.patch("/admin/api/tasks/:id/assign", requireWebSession, requirePermission("t
   const task = assignTask(req.params.id, clientId);
   if (!task) return res.status(404).json({ error: "task not found" });
   dispatchTaskInBackground(task);
+  res.json({ task });
+});
+
+app.patch("/admin/api/tasks/:id/retry", requireWebSession, requirePermission("tasks:send"), async (req, res) => {
+  const task = retryTask(req.params.id);
+  if (!task) return res.status(404).json({ error: "task not found" });
   res.json({ task });
 });
 
@@ -639,6 +646,13 @@ app.patch("/api/tasks/:id/assign", async (req, res) => {
   const task = assignTask(req.params.id, clientId);
   if (!task) return res.status(404).json({ error: "task not found" });
   dispatchTaskInBackground(task);
+  res.json({ task });
+});
+
+app.patch("/api/tasks/:id/retry", async (req, res) => {
+  if (!hasApiPermission(req, "tasks:assign") && !hasApiPermission(req, "tasks:send")) return res.status(403).json({ error: "forbidden" });
+  const task = retryTask(req.params.id);
+  if (!task) return res.status(404).json({ error: "task not found" });
   res.json({ task });
 });
 
@@ -1141,6 +1155,19 @@ function dispatchTaskInBackground(task) {
       console.error(`failed to dispatch task ${task.id}`, error);
     });
   });
+}
+
+function retryTask(taskId) {
+  const current = getTask(taskId);
+  if (!current) return null;
+  const task = updateTask(taskId, {
+    status: "queued",
+    result: null,
+    error: null,
+    completedAt: null
+  });
+  dispatchTaskInBackground(task);
+  return task;
 }
 
 server.listen(config.port, () => {

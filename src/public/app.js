@@ -555,6 +555,7 @@ function render() {
           <select data-assign-select="${escapeHtml(task.id)}">
             ${state.clients.map((client) => `<option value="${escapeHtml(client.id)}" ${client.id === task.client_id ? "selected" : ""}>${escapeHtml(client.name || client.id)} (${escapeHtml(client.status)})</option>`).join("")}
           </select>
+          <button class="ghost-button" type="button" data-retry-task="${escapeHtml(task.id)}">Send</button>
           <button class="ghost-button" type="button" data-assign-task="${escapeHtml(task.id)}">Assign</button>
         </div>
       ` : ""}
@@ -1418,6 +1419,22 @@ function bindEvents() {
   });
 
   $("tasks").addEventListener("click", async (event) => {
+    const retryButton = event.target.closest("[data-retry-task]");
+    if (retryButton) {
+      const taskId = retryButton.dataset.retryTask;
+      retryButton.disabled = true;
+      await api(`/admin/api/tasks/${taskId}/retry`, { method: "PATCH" })
+        .then(({ task }) => {
+          rememberTask(task);
+          showToast("Task sent");
+          render();
+        })
+        .catch((error) => showToast(error.message))
+        .finally(() => {
+          retryButton.disabled = false;
+        });
+      return;
+    }
     const button = event.target.closest("[data-assign-task]");
     if (!button) return;
     const taskId = button.dataset.assignTask;

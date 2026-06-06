@@ -1259,6 +1259,26 @@ Authorization: Bearer replace-with-a-long-random-token
 
 示例域名请替换为你的 Hub 地址，例如 `https://ws.geekmt.com`。
 
+### 外部系统对接建议
+
+推荐外部业务系统按下面方式对接：
+
+1. 发送消息使用 `POST /api/tasks/send-message`。
+2. 接口返回 `202 Accepted` 后立即保存返回的 `task.id`。
+3. 后续用 `GET /api/tasks/<task-id>` 查询任务状态和失败原因。
+4. 接收新消息和任务状态变化优先使用 Webhook：`message.created`、`task.updated`。
+5. 查询历史消息时使用 `GET /api/messages?targetPhone=...&limit=...`，不要高频全量拉取全部消息。
+6. 查询会话列表 `GET /api/chats` 适合页面初始化或低频刷新，不建议第三方系统每秒轮询。
+7. 媒体文件先 `POST /api/uploads`，再把返回的 `file` 放进发送任务的 `media` 字段。
+
+建议轮询频率：
+
+- `GET /api/tasks/<task-id>`：发送任务创建后的短时间内可以 2-5 秒一次，任务结束后停止轮询。
+- `GET /api/messages`：如果没有 Webhook，建议 10-30 秒一次，并带 `clientId`、`targetPhone` 和较小 `limit`。
+- `GET /api/chats`：建议 30 秒以上一次，或只在用户打开聊天列表时请求。
+
+注意：Hub 使用 SQLite 和 Node.js 单进程。外部系统如果同时高频请求 `chats/messages/uploads`，可能造成事件循环阻塞，表现为 Web 页面短时间无法访问。生产环境建议尽量使用 Webhook 事件驱动，减少轮询。
+
 ### 认证检查
 
 ```bash
@@ -1342,6 +1362,8 @@ curl -X POST https://hub.example.com/api/tasks/send-message \
 说明：
 
 - `status` 表示任务当前状态，刚创建时可能是 `queued` 或 `running`。
+- `202 Accepted` 表示 Hub 已创建任务，不表示 WhatsApp 已经发送成功。
+- 实际发送结果以后续 `task.updated` Webhook 或 `GET /api/tasks/<task-id>` 为准。
 - `result` 是 client agent 回传的执行结果。发送成功后通常会包含 WhatsApp message id、chatId、recipient 等信息。
 - `error` 是失败原因。发送失败、client 断线、WhatsApp Web 抛错、媒体下载失败、派发超时等情况会尽量写入这里。
 - Web 后台的 Task Timeline 会直接显示 `Failure reason` 和 `Result details`。如果旧任务或异常断线场景没有回传详细错误，界面会显示 `No detailed error was returned by the client agent.`。
@@ -1635,6 +1657,13 @@ curl -H "x-hub-token: replace-with-a-long-random-token" "https://hub.example.com
 
 Hub 会尽量把 `@lid`、`@c.us` 或无后缀的同一数字会话合并到手机号会话下。若没有手机号映射，`conversation_key` 会回退为原始 `chat_id`。
 
+性能说明：
+
+- `/api/chats` 返回的是会话摘要，适合页面打开时加载或低频刷新。
+- Hub 会优先扫描最近消息来生成会话列表，`message_count` 表示当前扫描窗口内的消息数，不建议把它当作绝对历史总数。
+- 外部系统如果需要某个客户的完整业务消息，应优先使用 `/api/messages?targetPhone=手机号&clientId=客户端ID`。
+- 不建议第三方系统高频轮询 `/api/chats`。如果需要实时新消息，请使用 Webhook 的 `message.created`。
+
 ### 解析 ChatId 对应联系人
 
 当 WhatsApp 返回的会话 ID 不是手机号，例如 `88399604142300@lid`，可以让在线 client 通过 WhatsApp Web 查询联系人信息：
@@ -1820,6 +1849,20 @@ curl -X DELETE -H "x-hub-token: replace-with-a-long-random-token" https://hub.ex
 }
 ```
 
+接收端要求：
+
+- 第三方接收端需要提供公网可访问的 HTTPS `POST` 地址。
+- Hub 推送时 `content-type` 为 `application/json`。
+- 如果 webhook 配置了 `secret`，Hub 会把该值放在 `x-hub-signature` header 中；当前版本是简单 shared secret，不是 HMAC。
+- 接收端返回 `2xx` 即视为成功。
+- 当前版本不会持久化 webhook 投递日志，也没有完整重试队列；如果第三方系统非常依赖事件可靠性，建议接收 webhook 后立即入库，并定期用 `/api/messages` 或 `/api/tasks` 做补偿同步。
+
+推荐用法：
+
+- 新消息：订阅 `message.created`，不要高频轮询 `/api/messages` 或 `/api/chats`。
+- 任务状态：订阅 `task.updated`，同时保存发送接口返回的 `task.id`，必要时再查 `/api/tasks/<task-id>`。
+- 媒体消息：事件里的 `payload.media.url` 通常是 `/uploads/...` 相对路径，第三方系统下载时需要带 API token，且 token 需要 `messages:read` 权限。
+
 查询 webhook：
 
 ```bash
@@ -1878,6 +1921,8 @@ Hub:
 - `PUBLIC_BASE_URL`: Hub 对外访问地址，例如 `https://hub.example.com`。
 - `TRUST_PROXY`: 使用 Nginx/Caddy 等反向代理时设为 `true`。
 - `CLIENT_OFFLINE_AFTER_MS`: 心跳超时阈值，默认 45 秒。Hub 会优先检查 Socket.IO 是否仍在线；如果 socket 仍连接，会刷新在线状态而不是直接标记离线。历史同步、媒体下载或慢网络环境下可调大，例如 `120000`。
+- `SLOW_REQUEST_MS`: 慢请求日志阈值，默认 `3000`。请求超过该时间会输出 `[perf] slow request ...`，用于判断外部 API、Web UI 或上传是否拖慢 Hub。
+- `EVENT_LOOP_WARN_MS`: Node.js 事件循环卡顿日志阈值，默认 `1500`。超过该时间会输出 `[perf] event loop lag ...`，用于判断 SQLite 查询、消息同步、媒体上传或密集轮询是否阻塞服务。
 
 Agent:
 
