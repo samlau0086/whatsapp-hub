@@ -530,11 +530,14 @@ export function createMessage(message) {
     if (existing) {
       const existingPayload = parseJson(existing.payload);
       const nextPayload = parseJson(row.payload);
-      if (nextPayload?.media && !existingPayload?.media) {
+      if (nextPayload?.media && (!existingPayload?.media || (nextPayload.media.url && !existingPayload.media.url))) {
         const mergedPayload = {
           ...existingPayload,
           ...nextPayload,
-          media: nextPayload.media
+          media: {
+            ...(existingPayload.media || {}),
+            ...nextPayload.media
+          }
         };
         db.prepare(`
           UPDATE messages

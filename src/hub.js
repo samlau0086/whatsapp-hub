@@ -265,6 +265,16 @@ export async function resolveContactForClient(clientId, chatId) {
   }
 }
 
+export async function requestMediaDownload(clientId, payload) {
+  const socket = getLiveClientSocket(clientId);
+  if (!socket) return { ok: false, error: `client ${clientId} is offline` };
+  try {
+    return await socket.timeout(120_000).emitWithAck("media:download", payload);
+  } catch {
+    return { ok: false, error: `client ${clientId} did not answer media download request` };
+  }
+}
+
 async function resolveAndStoreContactMapping(io, message) {
   if (!message?.client_id || !message?.chat_id || message.contact_phone) return null;
   const result = await resolveContactForClient(message.client_id, message.chat_id);

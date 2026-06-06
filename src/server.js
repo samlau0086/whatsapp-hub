@@ -34,6 +34,7 @@ import {
   getClient,
   getClientConfig,
   getClientConfigByClientId,
+  getMessage,
   getTask,
   getUser,
   findLastOutboundClientForTarget,
@@ -61,7 +62,7 @@ import {
   updateUser,
   upsertContactMapping
 } from "./db.js";
-import { chooseClient, createHub, emitClientDeleted, forgetClientSocket, reconcileClientPresence, resolveContactForClient } from "./hub.js";
+import { chooseClient, createHub, emitClientDeleted, forgetClientSocket, reconcileClientPresence, requestMediaDownload, resolveContactForClient } from "./hub.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -318,6 +319,12 @@ app.put("/admin/api/contact-mappings", requireWebSession, requirePermission("mes
 
 app.get("/admin/api/tasks", requireWebSession, requirePermission("tasks:read"), (req, res) => {
   res.json({ tasks: listTasks({ clientId: req.query.clientId, status: req.query.status, limit: req.query.limit }) });
+});
+
+app.post("/admin/api/messages/:id/download-media", requireWebSession, requirePermission("messages:read"), async (req, res) => {
+  const result = await downloadMessageMedia(req.params.id);
+  if (!result.ok) return res.status(result.status || 409).json({ error: result.error });
+  res.json(result);
 });
 
 app.patch("/admin/api/tasks/:id/assign", requireWebSession, requirePermission("tasks:send"), async (req, res) => {
@@ -587,6 +594,13 @@ app.get("/api/messages", (req, res) => {
       limit: req.query.limit
     })
   });
+});
+
+app.post("/api/messages/:id/download-media", async (req, res) => {
+  if (!hasApiPermission(req, "messages:read")) return res.status(403).json({ error: "forbidden" });
+  const result = await downloadMessageMedia(req.params.id);
+  if (!result.ok) return res.status(result.status || 409).json({ error: result.error });
+  res.json(result);
 });
 
 app.get("/api/chats", (req, res) => {
@@ -1168,6 +1182,22 @@ function retryTask(taskId) {
   });
   dispatchTaskInBackground(task);
   return task;
+}
+
+async function downloadMessageMedia(messageId) {
+  const message = getMessage(messageId);
+  if (!message) return { ok: false, status: 404, error: "message not found" };
+  const media = message.payload?.media;
+  if (!media) return { ok: false, status: 400, error: "message has no media" };
+  if (media.url) return { ok: true, media, message };
+  if (!media.lazyDownload) return { ok: false, status: 409, error: "media is not available for lazy download" };
+  const result = await requestMediaDownload(message.client_id, {
+    messageId: message.id,
+    externalId: message.external_id,
+    whatsappMessageId: media.whatsappMessageId
+  });
+  if (!result?.ok) return { ok: false, status: 409, error: result?.error || "failed to download media" };
+  return { ok: true, media: result.media, message: getMessage(message.id) };
 }
 
 server.listen(config.port, () => {

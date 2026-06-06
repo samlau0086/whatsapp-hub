@@ -425,6 +425,14 @@ p {
   white-space: nowrap;
 }
 
+.media-lazy {
+  flex-wrap: wrap;
+}
+
+.media-lazy button {
+  margin-left: auto;
+}
+
 .media-file-icon {
   background: var(--control-bg);
   border-radius: 6px;

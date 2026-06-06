@@ -350,6 +350,19 @@ function messageDisplayBody(message) {
 function renderMessageContent(message) {
   const media = message.payload?.media;
   const body = message.body || message.payload?.caption || "";
+  if (media && !media.url) {
+    const name = media.originalName || media.filename || "Attachment";
+    const mimeType = String(media.mimeType || "");
+    const caption = body && body !== name ? `<p>${escapeHtml(body)}</p>` : "";
+    return `
+      <div class="media-file media-lazy">
+        <span class="media-file-icon">${mimeType.startsWith("video/") ? "video" : "file"}</span>
+        <span>${escapeHtml(name)}</span>
+        ${media.lazyDownload ? `<button class="ghost-button" type="button" data-download-message-media="${escapeHtml(message.id)}">Download media</button>` : ""}
+      </div>
+      ${caption}
+    `;
+  }
   if (!media?.url) return `<p>${escapeHtml(messageDisplayBody(message))}</p>`;
 
   const mimeType = String(media.mimeType || "");
@@ -1339,6 +1352,25 @@ function bindEvents() {
     state.editingChatMapping = false;
     await loadActiveChatMessages();
     render();
+  });
+
+  $("chat-messages").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-download-message-media]");
+    if (!button) return;
+    const messageId = button.dataset.downloadMessageMedia;
+    button.disabled = true;
+    await api(`/admin/api/messages/${messageId}/download-media`, { method: "POST" })
+      .then(({ message }) => {
+        if (message) {
+          state.messages = dedupeMessages([message, ...state.messages.filter((item) => item.id !== message.id)]).slice(0, 300);
+        }
+        showToast("Media downloaded");
+        render();
+      })
+      .catch((error) => showToast(error.message))
+      .finally(() => {
+        button.disabled = false;
+      });
   });
 
   $("active-chat-title").addEventListener("dblclick", () => {

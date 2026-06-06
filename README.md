@@ -1418,6 +1418,8 @@ Media API notes:
 - External systems should build the absolute URL with the Hub host, for example `https://hub.example.com/uploads/f3a1d28db4d94b6b9e9c0f0b4e5a7d23`.
 - Downloading `/uploads/...` requires a web session cookie, or an API token with `messages:read` or `uploads:create`.
 - Inbound WhatsApp media messages use the same `payload.media` shape after the client agent downloads and uploads the file to Hub.
+- Inbound video messages default to lazy mode. Hub stores metadata first and does not upload the large video file until the Web UI or an external system requests it.
+- To force lazy media download later, call `POST /api/messages/<message-id>/download-media` with a token that has `messages:read`.
 
 Download example:
 

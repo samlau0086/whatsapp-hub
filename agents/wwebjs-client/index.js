@@ -30,7 +30,8 @@ const config = {
   headless: process.env.PUPPETEER_HEADLESS !== "false",
   historySyncOnReady: process.env.HISTORY_SYNC_ON_READY !== "false",
   historySyncChatLimit: numberFromEnv("HISTORY_SYNC_CHAT_LIMIT", 50),
-  historySyncMessageLimit: numberFromEnv("HISTORY_SYNC_MESSAGE_LIMIT", 30)
+  historySyncMessageLimit: numberFromEnv("HISTORY_SYNC_MESSAGE_LIMIT", 30),
+  inboundVideoMode: process.env.INBOUND_VIDEO_MODE || "lazy"
 };
 
 const puppeteerArgs = ["--no-sandbox", "--disable-setuid-sandbox"];
@@ -47,6 +48,7 @@ const socket = io(config.hubUrl, {
 let whatsappReady = false;
 let restartTimer = null;
 let restartInProgress = false;
+const recentMessages = new Map();
 
 const whatsapp = new Client({
   authStrategy: new LocalAuth({
@@ -160,6 +162,22 @@ socket.on("contact:resolve", async (payload = {}, ack) => {
   }
 });
 
+socket.on("media:download", async (payload = {}, ack) => {
+  try {
+    const messageId = payload.externalId || payload.whatsappMessageId;
+    const message = recentMessages.get(messageId);
+    if (!message) {
+      return ack?.({ ok: false, error: "message is no longer available in this client session" });
+    }
+    const media = await uploadInboundMedia(message, "lazy_download", { force: true });
+    if (!media?.url) return ack?.({ ok: false, error: "failed to download media from WhatsApp" });
+    await emitHubMessage(message, "lazy_download", { media });
+    ack?.({ ok: true, media });
+  } catch (error) {
+    ack?.({ ok: false, error: error.message });
+  }
+});
+
 async function downloadMedia(mediaPayload) {
   const url = new URL(mediaPayload.url, config.hubUrl).toString();
   const response = await fetch(url, {
@@ -173,9 +191,12 @@ async function downloadMedia(mediaPayload) {
   return filePath;
 }
 
-async function uploadInboundMedia(message, source) {
+async function uploadInboundMedia(message, source, options = {}) {
   if (!message.hasMedia) return null;
   if (!isDownloadableMessageMedia(message)) return null;
+  if (!options.force && shouldLazyInboundMedia(message)) {
+    return lazyMediaPayload(message, source);
+  }
   try {
     const media = await message.downloadMedia();
     if (!media?.data || !media?.mimetype) return null;
@@ -198,7 +219,9 @@ async function uploadInboundMedia(message, source) {
       originalName: body.file?.originalName || fileName,
       mimeType: body.file?.mimeType || media.mimetype,
       source,
-      whatsappMessageId: message.id?._serialized || null
+      whatsappMessageId: message.id?._serialized || null,
+      lazyDownload: false,
+      downloadStatus: "downloaded"
     };
   } catch (error) {
     if (isUnsupportedMediaError(error)) {
@@ -364,10 +387,11 @@ async function resolveMessageContact(message) {
   }
 }
 
-async function emitHubMessage(message, source) {
+async function emitHubMessage(message, source, options = {}) {
+  rememberRecentMessage(message);
   const contact = await resolveMessageContact(message);
   const contactInfo = serializeContact(contact);
-  const media = await uploadInboundMedia(message, source);
+  const media = options.media || await uploadInboundMedia(message, source);
   const direction = message.fromMe ? "outbound" : "inbound";
   const chatId = message.fromMe ? message.to : message.from;
   const peerId = message.fromMe ? message.to : (message.author || message.from);
@@ -399,6 +423,36 @@ async function emitHubMessage(message, source) {
       type: message.type
     }
   });
+}
+
+function rememberRecentMessage(message) {
+  const id = message.id?._serialized;
+  if (!id) return;
+  recentMessages.set(id, message);
+  if (recentMessages.size > 500) {
+    const firstKey = recentMessages.keys().next().value;
+    recentMessages.delete(firstKey);
+  }
+}
+
+function shouldLazyInboundMedia(message) {
+  if (message.type !== "video") return false;
+  return ["lazy", "thumbnail", "metadata"].includes(config.inboundVideoMode);
+}
+
+function lazyMediaPayload(message, source) {
+  const mimeType = message._data?.mimetype || "video/mp4";
+  const fileName = message._data?.filename
+    || `whatsapp-${message.id?.id || Date.now()}${extensionFromMime(mimeType) || ".mp4"}`;
+  return {
+    originalName: fileName,
+    filename: fileName,
+    mimeType,
+    source,
+    whatsappMessageId: message.id?._serialized || null,
+    lazyDownload: true,
+    downloadStatus: "pending"
+  };
 }
 
 function extensionFromMime(mimeType) {
