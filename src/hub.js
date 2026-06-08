@@ -238,6 +238,10 @@ export function emitClientDeleted(clientId) {
   activeIo?.emit("client:deleted", { id: clientId });
 }
 
+export function emitChatDeleted(payload) {
+  activeIo?.emit("chat:deleted", payload);
+}
+
 export async function dispatchQueuedTasksForClient(clientId) {
   if (!activeIo) return;
   for (const task of listQueuedTasksForClient(clientId, 20)) {

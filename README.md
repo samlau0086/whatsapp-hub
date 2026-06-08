@@ -817,6 +817,7 @@ WEB_ADMIN_PASSWORD=replace-with-a-long-random-admin-password
 - `tasks:send`: 创建发送任务。
 - `tasks:assign`: 手动改派任务。
 - `messages:read`: 查询消息和 chats，也可下载消息里的 `/uploads/...` 媒体附件。
+- `messages:delete`: 删除指定会话消息，或清空某个 client 的全部聊天消息。
 - `requests:read`: 查询 API 请求记录。
 - `webhooks:manage`: 管理 webhooks。
 - `uploads:create`: 上传媒体附件。
@@ -1665,6 +1666,40 @@ Hub 会尽量把 `@lid`、`@c.us` 或无后缀的同一数字会话合并到手�
 - Hub 会优先扫描最近消息来生成会话列表，`message_count` 表示当前扫描窗口内的消息数，不建议把它当作绝对历史总数。
 - 外部系统如果需要某个客户的完整业务消息，应优先使用 `/api/messages?targetPhone=手机号&clientId=客户端ID`。
 - 不建议第三方系统高频轮询 `/api/chats`。如果需要实时新消息，请使用 Webhook 的 `message.created`。
+
+### 删除聊天消息
+
+删除指定 client 下的某个会话消息。`conversationKey` 推荐使用手机号；如果只有 WhatsApp 原始会话 ID，也可以传 `chatId`。
+
+```bash
+curl -X DELETE https://hub.example.com/api/chats \
+  -H "content-type: application/json" \
+  -H "x-hub-token: replace-with-a-long-random-token" \
+  -d "{\"clientId\":\"office-pc-01\",\"conversationKey\":\"447856364969\",\"chatId\":\"88399604142300@lid\"}"
+```
+
+响应示例：
+
+```json
+{
+  "ok": true,
+  "deleted": 12
+}
+```
+
+清空某个 client 的全部聊天消息：
+
+```bash
+curl -X DELETE \
+  -H "x-hub-token: replace-with-a-long-random-token" \
+  "https://hub.example.com/api/clients/office-pc-01/messages"
+```
+
+说明：
+
+- 需要 API token 拥有 `messages:delete` 权限。
+- 删除只会清理消息数据库和 Web 集中聊天列表，不会删除 client、任务时间线、API 请求记录或 WhatsApp 手机上的真实聊天记录。
+- Web 后台执行删除后会通过 Socket.IO 广播 `chat:deleted`，其他已打开的后台页面会同步移除对应聊天。
 
 ### 解析 ChatId 对应联系人
 

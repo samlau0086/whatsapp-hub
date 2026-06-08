@@ -692,6 +692,54 @@ export function listChats({ clientId, limit = 100 } = {}) {
   return Array.from(conversations.values());
 }
 
+export function deleteClientMessages(clientId) {
+  if (!clientId) return 0;
+  return db.prepare("DELETE FROM messages WHERE client_id = ?").run(clientId).changes;
+}
+
+export function deleteConversationMessages({ clientId, conversationKey, chatId }) {
+  if (!clientId || (!conversationKey && !chatId)) return 0;
+  const key = String(conversationKey || chatId || "");
+  const phone = normalizePhone(key);
+  const mappedChatIds = phone ? listChatIdsForPhone(phone, clientId) : [];
+  const params = {
+    clientId,
+    key,
+    strippedKey: stripChatIdServer(key),
+    phone,
+    phoneLike: phone ? `%${phone}%` : ""
+  };
+  mappedChatIds.forEach((mappedChatId, index) => {
+    params[`mappedChatId${index}`] = mappedChatId;
+  });
+  const mappedSql = mappedChatIds.length
+    ? `OR chat_id IN (${mappedChatIds.map((_, index) => `@mappedChatId${index}`).join(", ")})`
+    : "";
+  return db.prepare(`
+    DELETE FROM messages
+    WHERE client_id = @clientId
+      AND (
+        chat_id = @key
+        OR stripChatIdServer(chat_id) = @strippedKey
+        ${phone ? `
+          OR sender LIKE @phoneLike
+          OR recipient LIKE @phoneLike
+          ${mappedSql}
+          OR EXISTS (
+            SELECT 1
+            FROM contact_mappings cm
+            WHERE cm.client_id = messages.client_id
+              AND cm.phone = @phone
+              AND (
+                cm.chat_id = messages.chat_id
+                OR stripChatIdServer(cm.chat_id) = stripChatIdServer(messages.chat_id)
+              )
+          )
+        ` : ""}
+      )
+  `).run(params).changes;
+}
+
 export function listContactMappings({ clientId, phone, limit = 100 } = {}) {
   const where = [];
   const params = {};

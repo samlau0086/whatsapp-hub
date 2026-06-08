@@ -55,6 +55,12 @@ const i18n = {
     messageStream: "Message Stream",
     apiRequests: "API Requests",
     centralChat: "Central Chat",
+    clearChats: "Clear",
+    deleteChat: "Delete chat",
+    deleteShort: "Del",
+    deletedMessages: "Deleted {count} messages",
+    confirmDeleteChat: "Delete chat {value}?",
+    confirmClearChats: "Clear all chats for {value}?",
     send: "Send",
     selectClient: "Select a client",
     selectChat: "Choose a client and chat",
@@ -116,6 +122,12 @@ const i18n = {
     messageStream: "消息流",
     apiRequests: "API 请求记录",
     centralChat: "集中聊天",
+    clearChats: "清除",
+    deleteChat: "删除会话",
+    deleteShort: "删",
+    deletedMessages: "已删除 {count} 条消息",
+    confirmDeleteChat: "删除会话 {value}？",
+    confirmClearChats: "清除 {value} 的所有聊天？",
     send: "发送",
     selectClient: "选择客户端",
     selectChat: "请选择客户端和会话",
@@ -498,6 +510,7 @@ function render() {
   $("dispatch-hint").textContent = activeClient ? t("dispatchingWith", { name: activeClient.name || activeClient.id }) : t("randomClient");
   $("selected-client-pill").textContent = activeClient ? activeClient.id : t("noClientSelected");
   $("chat-summary").textContent = activeClient ? activeClient.id : t("selectClient");
+  $("clear-client-chats").hidden = !activeClient || !can("messages:delete");
   renderActiveChatHeader(activeChat);
   $("active-chat-subtitle").textContent = activeClient ? activeClient.name || activeClient.id : t("selectChat");
   const createClientButton = $("toggle-client-create");
@@ -535,7 +548,10 @@ function render() {
     ? renderLoadingState(t("loadingChats"))
     : visibleChats.length ? visibleChats.map((chat) => `
       <article class="chat-item ${chatConversationKey(chat) === state.selectedConversationKey ? "active" : ""}" data-chat-id="${escapeHtml(chat.chat_id)}" data-conversation-key="${escapeHtml(chatConversationKey(chat))}">
-        <strong>${escapeHtml(chat.conversation_key || chat.contact_phone || chat.chat_id)}</strong>
+        <div class="chat-item-head">
+          <strong>${escapeHtml(chat.conversation_key || chat.contact_phone || chat.chat_id)}</strong>
+          ${can("messages:delete") ? `<button class="icon-button danger-button" type="button" title="${escapeHtml(t("deleteChat"))}" data-delete-chat="${escapeHtml(chatConversationKey(chat))}" data-delete-chat-id="${escapeHtml(chat.chat_id)}">${escapeHtml(t("deleteShort"))}</button>` : ""}
+        </div>
         <span>${escapeHtml(chat.last_body || "")}</span>
         <span>${escapeHtml(String(chat.message_count))} messages / ${relativeTime(chat.last_message_at)}</span>
       </article>
@@ -982,6 +998,10 @@ function connectSocket() {
         .catch(() => {});
     }
   });
+  state.socket.on("chat:deleted", (payload = {}) => {
+    removeDeletedChatFromState(payload);
+    render();
+  });
 }
 
 async function refreshChats(clientId = state.selectedClientId) {
@@ -1345,6 +1365,33 @@ function bindEvents() {
   });
 
   $("chat-list").addEventListener("click", async (event) => {
+    const deleteButton = event.target.closest("[data-delete-chat]");
+    if (deleteButton) {
+      event.stopPropagation();
+      if (!state.selectedClientId) return;
+      const conversationKey = deleteButton.dataset.deleteChat;
+      const chatId = deleteButton.dataset.deleteChatId;
+      if (!window.confirm(t("confirmDeleteChat", { value: conversationKey || chatId }))) return;
+      deleteButton.disabled = true;
+      await api("/admin/api/chats", {
+        method: "DELETE",
+        body: JSON.stringify({
+          clientId: state.selectedClientId,
+          conversationKey,
+          chatId
+        })
+      })
+        .then((result) => {
+          removeDeletedChatFromState({ clientId: state.selectedClientId, conversationKey, chatId });
+          showToast(t("deletedMessages", { count: result.deleted || 0 }));
+          render();
+        })
+        .catch((error) => showToast(error.message))
+        .finally(() => {
+          deleteButton.disabled = false;
+        });
+      return;
+    }
     const item = event.target.closest("[data-chat-id]");
     if (!item) return;
     state.selectedChatId = item.dataset.chatId;
@@ -1352,6 +1399,18 @@ function bindEvents() {
     state.editingChatMapping = false;
     await loadActiveChatMessages();
     render();
+  });
+
+  $("clear-client-chats").addEventListener("click", async () => {
+    if (!state.selectedClientId) return;
+    if (!window.confirm(t("confirmClearChats", { value: state.selectedClientId }))) return;
+    await api(`/admin/api/clients/${encodeURIComponent(state.selectedClientId)}/messages`, { method: "DELETE" })
+      .then((result) => {
+        removeDeletedChatFromState({ clientId: state.selectedClientId, all: true });
+        showToast(t("deletedMessages", { count: result.deleted || 0 }));
+        render();
+      })
+      .catch((error) => showToast(error.message));
   });
 
   $("chat-messages").addEventListener("click", async (event) => {
@@ -1605,6 +1664,39 @@ function removeClientFromState(clientId) {
     state.selectedChatId = "";
     state.selectedConversationKey = "";
     state.chats = [];
+  }
+}
+
+function removeDeletedChatFromState({ clientId, all = false, conversationKey = "", chatId = "" } = {}) {
+  if (!clientId) return;
+  if (all) {
+    state.messages = state.messages.filter((message) => message.client_id !== clientId);
+    state.chats = state.chats.filter((chat) => chat.client_id !== clientId);
+    if (state.selectedClientId === clientId) {
+      state.selectedChatId = "";
+      state.selectedConversationKey = "";
+      state.editingChatMapping = false;
+    }
+    return;
+  }
+  const keys = new Set([conversationKey, chatId].filter(Boolean).map(String));
+  state.chats = state.chats.filter((chat) => {
+    if (chat.client_id !== clientId) return true;
+    return !keys.has(chatConversationKey(chat)) && !keys.has(String(chat.chat_id || ""));
+  });
+  state.messages = state.messages.filter((message) => {
+    if (message.client_id !== clientId) return true;
+    return !keys.has(String(message.conversation_key || ""))
+      && !keys.has(String(message.conversation_id || ""))
+      && !keys.has(String(message.contact_phone || ""))
+      && !keys.has(String(message.chat_id || ""))
+      && !keys.has(String(message.raw_chat_id || ""));
+  });
+  if (state.selectedClientId === clientId
+    && (keys.has(state.selectedConversationKey) || keys.has(state.selectedChatId))) {
+    state.selectedChatId = "";
+    state.selectedConversationKey = "";
+    state.editingChatMapping = false;
   }
 }
 

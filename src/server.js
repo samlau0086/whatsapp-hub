@@ -29,6 +29,8 @@ import {
   assignTask,
   createApiToken,
   createWebhook,
+  deleteClientMessages,
+  deleteConversationMessages,
   deleteUser,
   deleteWebhook,
   getClient,
@@ -62,7 +64,7 @@ import {
   updateUser,
   upsertContactMapping
 } from "./db.js";
-import { chooseClient, createHub, emitClientDeleted, forgetClientSocket, reconcileClientPresence, requestMediaDownload, resolveContactForClient } from "./hub.js";
+import { chooseClient, createHub, emitChatDeleted, emitClientDeleted, forgetClientSocket, reconcileClientPresence, requestMediaDownload, resolveContactForClient } from "./hub.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -276,8 +278,20 @@ app.get("/admin/api/chats", requireWebSession, requirePermission("messages:read"
   res.json({ chats: listChats({ clientId: req.query.clientId, limit: req.query.limit }) });
 });
 
+app.delete("/admin/api/chats", requireWebSession, requirePermission("messages:delete"), (req, res) => {
+  const result = deleteChatMessages(req);
+  if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
+  res.json(result);
+});
+
 app.get("/admin/api/clients/:id/messages", requireWebSession, requirePermission("messages:read"), (req, res) => {
   res.json({ messages: listMessages({ clientId: req.params.id, limit: req.query.limit }) });
+});
+
+app.delete("/admin/api/clients/:id/messages", requireWebSession, requirePermission("messages:delete"), (req, res) => {
+  const deleted = deleteClientMessages(req.params.id);
+  emitChatDeleted({ clientId: req.params.id, all: true });
+  res.json({ ok: true, deleted });
 });
 
 app.get("/admin/api/clients/:id/contact", requireWebSession, requirePermission("messages:read"), async (req, res) => {
@@ -594,6 +608,20 @@ app.get("/api/messages", (req, res) => {
       limit: req.query.limit
     })
   });
+});
+
+app.delete("/api/chats", (req, res) => {
+  if (!hasApiPermission(req, "messages:delete")) return res.status(403).json({ error: "forbidden" });
+  const result = deleteChatMessages(req);
+  if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
+  res.json(result);
+});
+
+app.delete("/api/clients/:id/messages", (req, res) => {
+  if (!hasApiPermission(req, "messages:delete")) return res.status(403).json({ error: "forbidden" });
+  const deleted = deleteClientMessages(req.params.id);
+  emitChatDeleted({ clientId: req.params.id, all: true });
+  res.json({ ok: true, deleted });
 });
 
 app.post("/api/messages/:id/download-media", async (req, res) => {
@@ -1198,6 +1226,17 @@ async function downloadMessageMedia(messageId) {
   });
   if (!result?.ok) return { ok: false, status: 409, error: result?.error || "failed to download media" };
   return { ok: true, media: result.media, message: getMessage(message.id) };
+}
+
+function deleteChatMessages(req) {
+  const clientId = req.body?.clientId || req.query.clientId;
+  const conversationKey = req.body?.conversationKey || req.query.conversationKey;
+  const chatId = req.body?.chatId || req.query.chatId;
+  if (!clientId) return { ok: false, status: 400, error: "clientId is required" };
+  if (!conversationKey && !chatId) return { ok: false, status: 400, error: "conversationKey or chatId is required" };
+  const deleted = deleteConversationMessages({ clientId, conversationKey, chatId });
+  emitChatDeleted({ clientId, conversationKey: conversationKey || chatId, chatId, deleted });
+  return { ok: true, deleted };
 }
 
 server.listen(config.port, () => {

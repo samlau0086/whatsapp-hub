@@ -19,6 +19,7 @@ export const roles = {
     "tasks:read",
     "tasks:send",
     "messages:read",
+    "messages:delete",
     "requests:read",
     "webhooks:manage",
     "users:manage",
@@ -30,6 +31,7 @@ export const roles = {
     "tasks:read",
     "tasks:send",
     "messages:read",
+    "messages:delete",
     "requests:read",
     "webhooks:manage",
     "users:manage"
@@ -39,6 +41,7 @@ export const roles = {
     "tasks:read",
     "tasks:send",
     "messages:read",
+    "messages:delete",
     "requests:read"
   ],
   viewer: [
@@ -56,6 +59,7 @@ export const apiPermissions = [
   "tasks:send",
   "tasks:assign",
   "messages:read",
+  "messages:delete",
   "requests:read",
   "webhooks:manage",
   "uploads:create"

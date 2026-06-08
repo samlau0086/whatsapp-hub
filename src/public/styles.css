@@ -305,6 +305,25 @@ p {
   border-color: #9db9d8;
 }
 
+.chat-item-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.chat-item-head strong {
+  min-width: 0;
+}
+
+.chat-item-head .icon-button {
+  flex: 0 0 auto;
+  min-height: 26px;
+  min-width: 34px;
+  padding: 0 6px;
+}
+
 .chat-item strong,
 .chat-item span {
   overflow: hidden;
