@@ -849,7 +849,8 @@ function buildClientDeployment(clientConfig, token, fallbackHubUrl = config.publ
     ["PUPPETEER_HEADLESS", resolved.headless ? "true" : "false"],
     ["HISTORY_SYNC_ON_READY", "true"],
     ["HISTORY_SYNC_CHAT_LIMIT", "50"],
-    ["HISTORY_SYNC_MESSAGE_LIMIT", "30"]
+    ["HISTORY_SYNC_MESSAGE_LIMIT", "30"],
+    ["HISTORY_SYNC_INTERVAL_MS", "300000"]
   ].map(([key, value]) => `${key}=${quoteEnv(value)}`).join("\n");
 
   const agentBaseUrl = new URL("/agent/", resolved.hubUrl).toString();

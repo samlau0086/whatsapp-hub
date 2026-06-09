@@ -1108,6 +1108,7 @@ PUPPETEER_HEADLESS=false
 HISTORY_SYNC_ON_READY=true
 HISTORY_SYNC_CHAT_LIMIT=50
 HISTORY_SYNC_MESSAGE_LIMIT=30
+HISTORY_SYNC_INTERVAL_MS=300000
 ```
 
 字段说明：
@@ -1125,8 +1126,9 @@ HISTORY_SYNC_MESSAGE_LIMIT=30
 - `HISTORY_SYNC_ON_READY`: agent 启动并 ready 后是否主动补拉最近聊天记录，建议保持 `true`。
 - `HISTORY_SYNC_CHAT_LIMIT`: 每次上线补拉最近多少个会话，默认 `50`。
 - `HISTORY_SYNC_MESSAGE_LIMIT`: 每个会话补拉最近多少条消息，默认 `30`。
+- `HISTORY_SYNC_INTERVAL_MS`: agent ready 后定时补偿同步间隔，默认 `300000` 毫秒，也就是 5 分钟。设得越小越实时，但越容易增加电脑和 Hub 压力。
 
-断线期间客户发来的消息不会实时进入 Hub。agent 重新上线后，会通过 WhatsApp Web 主动读取最近聊天记录并上报 Hub；Hub 会按 WhatsApp 消息 `external_id` 去重，所以重复补拉不会重复入库。这个机制能覆盖大多数短暂断线场景，但是否能补回所有历史，仍取决于 WhatsApp Web 当时能同步到多少历史消息。
+断线期间客户发来的消息不会实时进入 Hub。agent 重新上线后，会通过 WhatsApp Web 主动读取最近聊天记录并上报 Hub；agent ready 后也会按 `HISTORY_SYNC_INTERVAL_MS` 定时做轻量补偿同步。Hub 会按 WhatsApp 消息 `external_id` 去重，所以重复补拉不会重复入库。这个机制能覆盖大多数短暂断线场景，也能补到手机端或其他 WhatsApp Web 已经发出的最近消息；但是否能补回所有历史，仍取决于 WhatsApp Web 当时能同步到多少历史消息，以及 `HISTORY_SYNC_CHAT_LIMIT` / `HISTORY_SYNC_MESSAGE_LIMIT` 设置得是否足够大。
 
 启动 agent：
 
@@ -1973,6 +1975,10 @@ Agent:
 - `CLIENT_PROXY_USERNAME`: 代理用户名。
 - `CLIENT_PROXY_PASSWORD`: 代理密码。
 - `PUPPETEER_HEADLESS`: 是否无头运行 Chromium。
+- `HISTORY_SYNC_ON_READY`: agent ready 后是否补拉最近聊天记录，建议保持 `true`。
+- `HISTORY_SYNC_CHAT_LIMIT`: 每次补偿同步扫描最近多少个会话。
+- `HISTORY_SYNC_MESSAGE_LIMIT`: 每个会话补偿同步最近多少条消息。
+- `HISTORY_SYNC_INTERVAL_MS`: agent 在线期间的周期补偿同步间隔，默认 5 分钟。需要更及时同步手机端/其他 WhatsApp Web 发出的消息时可适当调小，例如 `120000`；消息很多时建议调大。
 
 ## Web 后台新增 Client 部署
 

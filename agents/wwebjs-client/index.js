@@ -31,6 +31,7 @@ const config = {
   historySyncOnReady: process.env.HISTORY_SYNC_ON_READY !== "false",
   historySyncChatLimit: numberFromEnv("HISTORY_SYNC_CHAT_LIMIT", 50),
   historySyncMessageLimit: numberFromEnv("HISTORY_SYNC_MESSAGE_LIMIT", 30),
+  historySyncIntervalMs: numberFromEnv("HISTORY_SYNC_INTERVAL_MS", 300_000),
   inboundVideoMode: process.env.INBOUND_VIDEO_MODE || "lazy"
 };
 
@@ -48,6 +49,8 @@ const socket = io(config.hubUrl, {
 let whatsappReady = false;
 let restartTimer = null;
 let restartInProgress = false;
+let historySyncTimer = null;
+let historySyncInProgress = false;
 const recentMessages = new Map();
 
 const whatsapp = new Client({
@@ -80,6 +83,7 @@ console.log(`proxy: ${config.proxyUrl || "disabled"}`);
 console.log(`browser executable: ${config.executablePath || "Puppeteer managed Chrome"}`);
 console.log(`qr image output: ${config.qrOutputDir}`);
 console.log(`history sync: ${config.historySyncOnReady ? `${config.historySyncChatLimit} chats x ${config.historySyncMessageLimit} messages` : "disabled"}`);
+console.log(`history sync interval: ${config.historySyncOnReady ? `${config.historySyncIntervalMs} ms` : "disabled"}`);
 
 function emitHello(status = "online") {
   socket.emit("client:hello", {
@@ -102,6 +106,10 @@ function emitHello(status = "online") {
 
 socket.on("connect", () => {
   emitHello();
+  if (whatsappReady && config.historySyncOnReady) {
+    scheduleHistorySync("socket_reconnect", 2_000);
+    startPeriodicHistorySync();
+  }
 });
 
 socket.on("connect_error", (error) => {
@@ -269,9 +277,8 @@ whatsapp.on("ready", async () => {
   emitHello();
   console.log(`${config.clientId} is ready`);
   if (config.historySyncOnReady) {
-    await syncRecentMessages().catch((error) => {
-      console.error(`history sync failed: ${error.message}`);
-    });
+    scheduleHistorySync("ready", 3_000);
+    startPeriodicHistorySync();
   }
 });
 
@@ -281,6 +288,7 @@ whatsapp.on("authenticated", () => {
 
 whatsapp.on("disconnected", (reason) => {
   whatsappReady = false;
+  stopPeriodicHistorySync();
   socket.emit("client:heartbeat", { id: config.clientId, status: "offline", reason });
 });
 
@@ -329,28 +337,61 @@ async function restartWhatsAppClient(reason) {
   }
 }
 
-async function syncRecentMessages() {
-  console.log("starting history sync");
-  const chats = await whatsapp.getChats();
-  const recentChats = chats
-    .filter((chat) => chat?.id?._serialized)
-    .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
-    .slice(0, config.historySyncChatLimit);
-  let synced = 0;
+function startPeriodicHistorySync() {
+  if (historySyncTimer || !config.historySyncOnReady) return;
+  historySyncTimer = setInterval(() => {
+    scheduleHistorySync("periodic");
+  }, config.historySyncIntervalMs);
+  historySyncTimer.unref?.();
+}
 
-  for (const chat of recentChats) {
-    try {
-      const messages = await chat.fetchMessages({ limit: config.historySyncMessageLimit });
-      for (const message of messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))) {
-        await emitHubMessage(message, "history_sync");
-        synced += 1;
-      }
-    } catch (error) {
-      console.error(`failed to sync chat ${chat.id?._serialized || "unknown"}: ${error.message}`);
-    }
+function stopPeriodicHistorySync() {
+  if (!historySyncTimer) return;
+  clearInterval(historySyncTimer);
+  historySyncTimer = null;
+}
+
+function scheduleHistorySync(reason, delayMs = 0) {
+  if (!config.historySyncOnReady || !whatsappReady) return;
+  setTimeout(() => {
+    syncRecentMessages(reason).catch((error) => {
+      console.error(`history sync failed (${reason}): ${error.message}`);
+    });
+  }, delayMs).unref?.();
+}
+
+async function syncRecentMessages(reason = "manual") {
+  if (!whatsappReady) return;
+  if (historySyncInProgress) {
+    console.log(`history sync skipped (${reason}): previous sync is still running`);
+    return;
   }
+  historySyncInProgress = true;
+  console.log(`starting history sync (${reason})`);
+  try {
+    const chats = await whatsapp.getChats();
+    const recentChats = chats
+      .filter((chat) => chat?.id?._serialized)
+      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+      .slice(0, config.historySyncChatLimit);
+    let synced = 0;
 
-  console.log(`history sync completed: ${synced} messages from ${recentChats.length} chats`);
+    for (const chat of recentChats) {
+      try {
+        const messages = await chat.fetchMessages({ limit: config.historySyncMessageLimit });
+        for (const message of messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))) {
+          await emitHubMessage(message, "history_sync");
+          synced += 1;
+        }
+      } catch (error) {
+        console.error(`failed to sync chat ${chat.id?._serialized || "unknown"}: ${error.message}`);
+      }
+    }
+
+    console.log(`history sync completed (${reason}): ${synced} messages from ${recentChats.length} chats`);
+  } finally {
+    historySyncInProgress = false;
+  }
 }
 
 function safeFileName(value) {
