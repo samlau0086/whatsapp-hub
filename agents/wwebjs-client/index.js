@@ -1,115 +1,72 @@
+import makeWASocket, {
+  DisconnectReason,
+  downloadMediaMessage,
+  fetchLatestBaileysVersion,
+  jidNormalizedUser,
+  makeCacheableSignalKeyStore,
+  useMultiFileAuthState
+} from "@whiskeysockets/baileys";
 import dotenv from "dotenv";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import Pino from "pino";
+import { ProxyAgent } from "proxy-agent";
 import QRCode from "qrcode";
 import qrcodeTerminal from "qrcode-terminal";
 import { io } from "socket.io-client";
-import pkg from "whatsapp-web.js";
 
 dotenv.config();
-
-const { Client, LocalAuth, MessageMedia } = pkg;
-
-const configuredExecutablePath = process.env.PUPPETEER_EXECUTABLE_PATH || "";
-const executablePath = resolveBrowserExecutablePath(configuredExecutablePath);
 
 const config = {
   hubUrl: process.env.HUB_URL || "http://localhost:3000",
   token: process.env.CLIENT_TOKEN || process.env.HUB_API_TOKEN || "dev-token",
   clientId: process.env.CLIENT_ID || "client-main",
   clientName: process.env.CLIENT_NAME || "Main WhatsApp Client",
-  authDataPath: path.resolve(process.env.WWEBJS_AUTH_DATA_PATH || ".wwebjs_auth"),
-  cachePath: path.resolve(process.env.WWEBJS_CACHE_PATH || ".wwebjs_cache"),
+  authDataPath: path.resolve(process.env.BAILEYS_AUTH_DATA_PATH || process.env.WWEBJS_AUTH_DATA_PATH || ".baileys_auth"),
+  cachePath: path.resolve(process.env.BAILEYS_STORE_PATH || process.env.WWEBJS_CACHE_PATH || ".baileys_store"),
   proxyUrl: process.env.CLIENT_PROXY_URL || "",
   proxyUsername: process.env.CLIENT_PROXY_USERNAME || "",
   proxyPassword: process.env.CLIENT_PROXY_PASSWORD || "",
-  executablePath,
   qrOutputDir: path.resolve(process.env.QR_OUTPUT_DIR || "."),
-  headless: process.env.PUPPETEER_HEADLESS !== "false",
   historySyncOnReady: process.env.HISTORY_SYNC_ON_READY !== "false",
   historySyncChatLimit: numberFromEnv("HISTORY_SYNC_CHAT_LIMIT", 50),
   historySyncMessageLimit: numberFromEnv("HISTORY_SYNC_MESSAGE_LIMIT", 30),
   historySyncIntervalMs: numberFromEnv("HISTORY_SYNC_INTERVAL_MS", 300_000),
-  inboundVideoMode: process.env.INBOUND_VIDEO_MODE || "lazy"
+  inboundVideoMode: process.env.INBOUND_VIDEO_MODE || "lazy",
+  printQrInTerminal: process.env.PRINT_QR_IN_TERMINAL !== "false",
+  syncFullHistory: process.env.BAILEYS_SYNC_FULL_HISTORY === "true"
 };
 
-const puppeteerArgs = ["--no-sandbox", "--disable-setuid-sandbox"];
-if (config.proxyUrl) {
-  puppeteerArgs.push(`--proxy-server=${config.proxyUrl}`);
-}
-
+const logger = Pino({ level: process.env.BAILEYS_LOG_LEVEL || "silent" });
+const proxyUrl = buildProxyUrl(config.proxyUrl, config.proxyUsername, config.proxyPassword);
+const proxyAgent = proxyUrl ? new ProxyAgent(proxyUrl) : null;
 const socket = io(config.hubUrl, {
   auth: { token: config.token },
   reconnection: true,
   reconnectionDelayMax: 10_000
 });
 
+let sock = null;
 let whatsappReady = false;
-let restartTimer = null;
-let restartInProgress = false;
+let reconnectTimer = null;
 let historySyncTimer = null;
 let historySyncInProgress = false;
 const recentMessages = new Map();
+const knownChats = new Map();
+const knownContacts = new Map();
 
-const whatsapp = new Client({
-  authStrategy: new LocalAuth({
-    clientId: config.clientId,
-    dataPath: config.authDataPath
-  }),
-  ...(config.proxyUsername || config.proxyPassword
-    ? {
-        proxyAuthentication: {
-          username: config.proxyUsername,
-          password: config.proxyPassword
-        }
-      }
-    : {}),
-  puppeteer: {
-    headless: config.headless,
-    ...(config.executablePath ? { executablePath: config.executablePath } : {}),
-    args: puppeteerArgs
-  },
-  webVersionCache: {
-    type: "local",
-    path: config.cachePath
-  }
-});
-
-console.log(`auth data path: ${config.authDataPath}`);
-console.log(`web cache path: ${config.cachePath}`);
-console.log(`proxy: ${config.proxyUrl || "disabled"}`);
-console.log(`browser executable: ${config.executablePath || "Puppeteer managed Chrome"}`);
+console.log(`baileys auth data path: ${config.authDataPath}`);
+console.log(`baileys store path: ${config.cachePath}`);
+console.log(`whatsapp proxy: ${proxyUrl ? maskProxyUrl(proxyUrl) : "disabled"}`);
 console.log(`qr image output: ${config.qrOutputDir}`);
 console.log(`history sync: ${config.historySyncOnReady ? `${config.historySyncChatLimit} chats x ${config.historySyncMessageLimit} messages` : "disabled"}`);
 console.log(`history sync interval: ${config.historySyncOnReady ? `${config.historySyncIntervalMs} ms` : "disabled"}`);
 
-function emitHello(status = "online") {
-  socket.emit("client:hello", {
-    id: config.clientId,
-    name: config.clientName,
-    phone: whatsapp.info?.wid?.user || null,
-    status,
-    metadata: {
-      platform: "whatsapp-web.js",
-      pushname: whatsapp.info?.pushname || null
-    }
-  }, (response) => {
-    if (!response?.ok) {
-      console.error(`Hub rejected client hello: ${response?.error || "unknown error"}`);
-    } else {
-      console.log(`Hub registered client ${config.clientId} as ${response.client?.status || status}`);
-    }
-  });
-}
-
 socket.on("connect", () => {
-  emitHello();
-  if (whatsappReady && config.historySyncOnReady) {
-    scheduleHistorySync("socket_reconnect", 2_000);
-    startPeriodicHistorySync();
-  }
+  emitHello(whatsappReady ? "online" : "offline");
+  if (whatsappReady) scheduleHistorySync("socket_reconnect", 2_000);
 });
 
 socket.on("connect_error", (error) => {
@@ -119,52 +76,40 @@ socket.on("connect_error", (error) => {
 socket.on("task:send-message", async (task, ack) => {
   ack?.({ accepted: true });
   try {
-    if (!whatsappReady) {
-      throw new Error("WhatsApp client is not ready yet");
-    }
-    const { to, chatId: payloadChatId, body } = task.payload;
-    const chatId = normalizeChatId(payloadChatId || to);
-    const mediaPayload = task.payload.media;
-    const localMediaPath = mediaPayload?.url ? await downloadMedia(mediaPayload) : null;
-    const result = localMediaPath
-      ? await whatsapp.sendMessage(chatId, MessageMedia.fromFilePath(localMediaPath), {
-          caption: body || "",
-          sendMediaAsDocument: mediaPayload.sendAsDocument === true
-        })
-      : await whatsapp.sendMessage(chatId, body);
+    if (!whatsappReady || !sock) throw new Error("WhatsApp client is not ready yet");
+    const { to, chatId: payloadChatId, body } = task.payload || {};
+    const jid = normalizeChatId(payloadChatId || to);
+    const mediaPayload = task.payload?.media;
+    const content = mediaPayload?.url
+      ? await buildBaileysMediaContent(mediaPayload, body)
+      : { text: body || "" };
+    const result = await sock.sendMessage(jid, content);
     socket.emit("task:result", {
       taskId: task.id,
       ok: true,
       result: {
-        messageId: result.id?._serialized,
-        chatId
+        messageId: makeMessageExternalId(result?.key),
+        chatId: jid
       }
     });
   } catch (error) {
-    const recoverableBrowserError = isRecoverableBrowserContextError(error);
-    if (recoverableBrowserError) {
-      scheduleWhatsAppRestart(error.message);
-    }
     socket.emit("task:result", {
       taskId: task.id,
       ok: false,
-      error: recoverableBrowserError
-        ? `${error.message}. WhatsApp Web browser context was detached; client restart has been scheduled.`
-        : error.message,
-      result: recoverableBrowserError ? {
-        code: "browser_context_detached",
-        recoverable: true,
-        restartScheduled: true
-      } : null
+      error: error.message,
+      result: {
+        code: "baileys_send_failed",
+        recoverable: isRecoverableBaileysError(error)
+      }
     });
+    if (isRecoverableBaileysError(error)) scheduleReconnect(error.message);
   }
 });
 
 socket.on("contact:resolve", async (payload = {}, ack) => {
   try {
-    const chatId = normalizeChatId(payload.chatId || payload.id || payload.to);
-    const contact = await whatsapp.getContactById(chatId);
-    ack?.({ ok: true, contact: serializeContact(contact), chatId });
+    const jid = normalizeChatId(payload.chatId || payload.id || payload.to);
+    ack?.({ ok: true, chatId: jid, contact: serializeContact(jid) });
   } catch (error) {
     ack?.({ ok: false, error: error.message });
   }
@@ -186,34 +131,158 @@ socket.on("media:download", async (payload = {}, ack) => {
   }
 });
 
-async function downloadMedia(mediaPayload) {
+await connectBaileys();
+
+async function connectBaileys() {
+  const { state, saveCreds } = await useMultiFileAuthState(config.authDataPath);
+  const { version } = await fetchLatestBaileysVersion();
+  sock = makeWASocket({
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, logger)
+    },
+    browser: ["WhatsApp Actor Hub", "Chrome", "1.0.0"],
+    emitOwnEvents: true,
+    logger,
+    markOnlineOnConnect: true,
+    printQRInTerminal: false,
+    shouldSyncHistoryMessage: () => config.historySyncOnReady,
+    syncFullHistory: config.syncFullHistory,
+    ...(proxyAgent ? { agent: proxyAgent, fetchAgent: proxyAgent } : {}),
+    version
+  });
+
+  sock.ev.on("creds.update", saveCreds);
+  sock.ev.on("connection.update", handleConnectionUpdate);
+  sock.ev.on("chats.set", ({ chats = [] } = {}) => {
+    chats.forEach((chat) => rememberChat(chat));
+  });
+  sock.ev.on("chats.upsert", (chats = []) => {
+    chats.forEach((chat) => rememberChat(chat));
+  });
+  sock.ev.on("contacts.set", ({ contacts = [] } = {}) => {
+    contacts.forEach((contact) => rememberContact(contact));
+  });
+  sock.ev.on("contacts.upsert", (contacts = []) => {
+    contacts.forEach((contact) => rememberContact(contact));
+  });
+  sock.ev.on("messages.upsert", async ({ messages = [], type } = {}) => {
+    await processMessages(messages, type || "messages_upsert");
+  });
+  sock.ev.on("messaging-history.set", async ({ chats = [], contacts = [], messages = [] } = {}) => {
+    chats.forEach((chat) => rememberChat(chat));
+    contacts.forEach((contact) => rememberContact(contact));
+    await processMessages(messages, "history_sync");
+  });
+}
+
+async function handleConnectionUpdate(update = {}) {
+  const { connection, lastDisconnect, qr } = update;
+  if (qr) await saveQr(qr);
+  if (connection === "open") {
+    whatsappReady = true;
+    emitHello("online");
+    console.log(`${config.clientId} is ready (Baileys)`);
+    startPeriodicHistorySync();
+    scheduleHistorySync("ready", 3_000);
+  }
+  if (connection === "close") {
+    whatsappReady = false;
+    stopPeriodicHistorySync();
+    const statusCode = lastDisconnect?.error?.output?.statusCode;
+    const loggedOut = statusCode === DisconnectReason.loggedOut;
+    emitHeartbeat("offline", lastDisconnect?.error?.message || "connection closed");
+    if (loggedOut) {
+      console.error("WhatsApp logged out. Delete auth directory if needed, then scan QR again.");
+      return;
+    }
+    scheduleReconnect(lastDisconnect?.error?.message || `connection closed (${statusCode || "unknown"})`);
+  }
+}
+
+async function processMessages(messages, source) {
+  const cleanMessages = messages
+    .filter((message) => message?.key?.remoteJid && message.message)
+    .sort((a, b) => (Number(a.messageTimestamp || 0) - Number(b.messageTimestamp || 0)));
+  for (const message of cleanMessages) {
+    rememberRecentMessage(message);
+    await emitHubMessage(message, source).catch((error) => {
+      console.error(`failed to emit message ${makeMessageExternalId(message.key)}: ${error.message}`);
+    });
+  }
+}
+
+function emitHello(status = "online") {
+  socket.emit("client:hello", {
+    id: config.clientId,
+    name: config.clientName,
+    phone: ownPhone(),
+    status,
+    metadata: {
+      platform: "baileys",
+      pushname: sock?.user?.name || null
+    }
+  }, (response) => {
+    if (!response?.ok) {
+      console.error(`Hub rejected client hello: ${response?.error || "unknown error"}`);
+    } else {
+      console.log(`Hub registered client ${config.clientId} as ${response.client?.status || status}`);
+    }
+  });
+}
+
+function emitHeartbeat(status = "online", reason = null) {
+  if (!socket.connected) return;
+  socket.emit("client:heartbeat", {
+    id: config.clientId,
+    name: config.clientName,
+    phone: ownPhone(),
+    status,
+    reason,
+    metadata: {
+      platform: "baileys",
+      pushname: sock?.user?.name || null
+    }
+  });
+}
+
+setInterval(() => {
+  emitHeartbeat(whatsappReady ? "online" : "offline");
+}, 15_000).unref();
+
+async function buildBaileysMediaContent(mediaPayload, body = "") {
   const url = new URL(mediaPayload.url, config.hubUrl).toString();
   const response = await fetch(url, {
     headers: { "x-hub-token": config.token }
   });
   if (!response.ok) throw new Error(`failed to download media: ${response.status}`);
-  const extension = path.extname(mediaPayload.originalName || "") || "";
-  const filePath = path.join(os.tmpdir(), `wah-${Date.now()}-${Math.random().toString(16).slice(2)}${extension}`);
-  const bytes = Buffer.from(await response.arrayBuffer());
-  await fsp.writeFile(filePath, bytes);
-  return filePath;
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const mimeType = mediaPayload.mimeType || mediaPayload.mimetype || response.headers.get("content-type") || "application/octet-stream";
+  const fileName = mediaPayload.originalName || mediaPayload.filename || `file-${Date.now()}${extensionFromMime(mimeType)}`;
+  if (mediaPayload.sendAsDocument === true) {
+    return { document: buffer, mimetype: mimeType, fileName, caption: body || "" };
+  }
+  if (mimeType.startsWith("image/")) return { image: buffer, caption: body || "" };
+  if (mimeType.startsWith("video/")) return { video: buffer, mimetype: mimeType, caption: body || "" };
+  if (mimeType.startsWith("audio/")) return { audio: buffer, mimetype: mimeType, ptt: false };
+  return { document: buffer, mimetype: mimeType, fileName, caption: body || "" };
 }
 
 async function uploadInboundMedia(message, source, options = {}) {
-  if (!message.hasMedia) return null;
-  if (!isDownloadableMessageMedia(message)) return null;
-  if (!options.force && shouldLazyInboundMedia(message)) {
-    return lazyMediaPayload(message, source);
+  const mediaInfo = mediaMessageInfo(message);
+  if (!mediaInfo) return null;
+  if (!options.force && shouldLazyInboundMedia(mediaInfo)) {
+    return lazyMediaPayload(message, mediaInfo, source);
   }
   try {
-    const media = await message.downloadMedia();
-    if (!media?.data || !media?.mimetype) return null;
-    const bytes = Buffer.from(media.data, "base64");
-    const fileName = media.filename
-      || message._data?.filename
-      || `whatsapp-${message.id?.id || Date.now()}${extensionFromMime(media.mimetype)}`;
+    const buffer = await downloadMediaMessage(message, "buffer", {}, {
+      logger,
+      reuploadRequest: sock?.updateMediaMessage
+    });
+    if (!buffer?.length) return null;
+    const fileName = mediaInfo.fileName || `whatsapp-${message.key?.id || Date.now()}${extensionFromMime(mediaInfo.mimeType)}`;
     const form = new FormData();
-    form.append("file", new Blob([bytes], { type: media.mimetype }), fileName);
+    form.append("file", new Blob([buffer], { type: mediaInfo.mimeType }), fileName);
     const response = await fetch(new URL("/api/uploads", config.hubUrl), {
       method: "POST",
       headers: { "x-hub-token": config.token },
@@ -225,116 +294,120 @@ async function uploadInboundMedia(message, source, options = {}) {
       ...body.file,
       filename: fileName,
       originalName: body.file?.originalName || fileName,
-      mimeType: body.file?.mimeType || media.mimetype,
+      mimeType: body.file?.mimeType || mediaInfo.mimeType,
       source,
-      whatsappMessageId: message.id?._serialized || null,
+      whatsappMessageId: makeMessageExternalId(message.key),
       lazyDownload: false,
       downloadStatus: "downloaded"
     };
   } catch (error) {
-    if (isUnsupportedMediaError(error)) {
-      console.warn(`skipped unsupported inbound media ${message.id?._serialized || ""}: ${message.type || "unknown"}`);
-    } else {
-      console.error(`failed to upload inbound media ${message.id?._serialized || ""}: ${error.message}`);
-    }
+    console.error(`failed to upload inbound media ${makeMessageExternalId(message.key)}: ${error.message}`);
     return null;
   }
 }
 
-setInterval(() => {
-  if (socket.connected) {
-    socket.emit("client:heartbeat", {
-      id: config.clientId,
-      name: config.clientName,
-      phone: whatsapp.info?.wid?.user || null,
-      status: "online",
-      metadata: {
-        platform: "whatsapp-web.js",
-        pushname: whatsapp.info?.pushname || null
-      }
-    });
-  }
-}, 15_000).unref();
+async function emitHubMessage(message, source, options = {}) {
+  rememberRecentMessage(message);
+  const content = normalizeMessageContent(message.message);
+  const mediaInfo = mediaMessageInfo(message);
+  const media = options.media || await uploadInboundMedia(message, source);
+  const remoteJid = jidNormalizedUser(message.key.remoteJid);
+  const participant = message.key.participant ? jidNormalizedUser(message.key.participant) : null;
+  const fromMe = Boolean(message.key.fromMe);
+  const peerJid = fromMe ? remoteJid : (participant || remoteJid);
+  const peerPhone = jidToPhone(peerJid);
+  const own = ownPhone();
+  const body = messageBody(content) || media?.originalName || "";
+  const createdAt = message.messageTimestamp
+    ? new Date(Number(message.messageTimestamp) * 1000).toISOString()
+    : new Date().toISOString();
 
-whatsapp.on("qr", async (qr) => {
-  whatsappReady = false;
-  qrcodeTerminal.generate(qr, { small: true });
-  try {
-    await fsp.mkdir(config.qrOutputDir, { recursive: true });
-    const clientQrPath = path.join(config.qrOutputDir, `whatsapp-qr-${safeFileName(config.clientId)}.png`);
-    const latestQrPath = path.join(config.qrOutputDir, "whatsapp-qr-latest.png");
-    await QRCode.toFile(clientQrPath, qr, { width: 420, margin: 2 });
-    await QRCode.toFile(latestQrPath, qr, { width: 420, margin: 2 });
-    console.log(`QR image saved: ${clientQrPath}`);
-    console.log(`Latest QR image: ${latestQrPath}`);
-  } catch (error) {
-    console.error(`failed to save QR image: ${error.message}`);
-  }
-});
-
-whatsapp.on("ready", async () => {
-  whatsappReady = true;
-  emitHello();
-  console.log(`${config.clientId} is ready`);
-  if (config.historySyncOnReady) {
-    scheduleHistorySync("ready", 3_000);
-    startPeriodicHistorySync();
-  }
-});
-
-whatsapp.on("authenticated", () => {
-  console.log(`${config.clientId} authenticated`);
-});
-
-whatsapp.on("disconnected", (reason) => {
-  whatsappReady = false;
-  stopPeriodicHistorySync();
-  socket.emit("client:heartbeat", { id: config.clientId, status: "offline", reason });
-});
-
-whatsapp.on("message", async (message) => {
-  await emitHubMessage(message, "message");
-});
-
-whatsapp.on("message_create", async (message) => {
-  if (!message.fromMe) return;
-  await emitHubMessage(message, "message_create");
-});
-
-whatsapp.initialize();
-
-function scheduleWhatsAppRestart(reason) {
-  if (restartTimer || restartInProgress) return;
-  console.warn(`scheduling WhatsApp client restart: ${reason}`);
-  whatsappReady = false;
-  socket.emit("client:heartbeat", {
-    id: config.clientId,
-    status: "offline",
-    reason: `browser restart scheduled: ${reason}`
+  socket.emit("message:created", {
+    clientId: config.clientId,
+    externalId: makeMessageExternalId(message.key),
+    direction: fromMe ? "outbound" : "inbound",
+    chatId: remoteJid,
+    sender: fromMe ? (own || sock?.user?.id) : (peerPhone || peerJid),
+    recipient: fromMe ? (peerPhone || remoteJid) : (own || sock?.user?.id),
+    body,
+    messageType: media ? "media" : (mediaInfo?.type || messageType(content)),
+    createdAt,
+    payload: {
+      from: fromMe ? sock?.user?.id : peerJid,
+      to: fromMe ? remoteJid : sock?.user?.id,
+      author: participant,
+      source,
+      senderId: fromMe ? sock?.user?.id : peerJid,
+      senderPhone: fromMe ? own : peerPhone,
+      recipientPhone: fromMe ? peerPhone : own,
+      contact: serializeContact(peerJid),
+      media,
+      caption: body,
+      hasMedia: Boolean(mediaInfo),
+      type: mediaInfo?.type || messageType(content),
+      rawKey: message.key
+    }
   });
-  restartTimer = setTimeout(() => {
-    restartTimer = null;
-    restartWhatsAppClient(reason).catch((error) => {
-      console.error(`failed to restart WhatsApp client: ${error.message}`);
-      scheduleWhatsAppRestart(error.message);
-    });
-  }, 2_000);
 }
 
-async function restartWhatsAppClient(reason) {
-  if (restartInProgress) return;
-  restartInProgress = true;
-  whatsappReady = false;
-  console.warn(`restarting WhatsApp client: ${reason}`);
-  try {
-    await whatsapp.destroy().catch((error) => {
-      console.warn(`failed to destroy existing WhatsApp client cleanly: ${error.message}`);
-    });
-    await wait(3_000);
-    await whatsapp.initialize();
-  } finally {
-    restartInProgress = false;
+function normalizeMessageContent(message = {}) {
+  let content = message;
+  for (const wrapper of ["ephemeralMessage", "viewOnceMessage", "viewOnceMessageV2", "documentWithCaptionMessage"]) {
+    if (content?.[wrapper]?.message) content = content[wrapper].message;
   }
+  return content || {};
+}
+
+function messageType(content = {}) {
+  return Object.keys(content).find((key) => key !== "messageContextInfo") || "text";
+}
+
+function messageBody(content = {}) {
+  return content.conversation
+    || content.extendedTextMessage?.text
+    || content.imageMessage?.caption
+    || content.videoMessage?.caption
+    || content.documentMessage?.caption
+    || content.buttonsResponseMessage?.selectedDisplayText
+    || content.listResponseMessage?.title
+    || content.templateButtonReplyMessage?.selectedDisplayText
+    || "";
+}
+
+function mediaMessageInfo(message) {
+  const content = normalizeMessageContent(message.message);
+  const mediaTypes = [
+    ["image", content.imageMessage],
+    ["video", content.videoMessage],
+    ["audio", content.audioMessage],
+    ["document", content.documentMessage],
+    ["sticker", content.stickerMessage]
+  ];
+  const [type, media] = mediaTypes.find(([, value]) => Boolean(value)) || [];
+  if (!type || !media) return null;
+  return {
+    type,
+    mimeType: media.mimetype || defaultMimeType(type),
+    fileName: media.fileName || media.title || `whatsapp-${message.key?.id || Date.now()}${extensionFromMime(media.mimetype || defaultMimeType(type))}`
+  };
+}
+
+function shouldLazyInboundMedia(mediaInfo) {
+  if (mediaInfo.type !== "video") return false;
+  return ["lazy", "thumbnail", "metadata"].includes(config.inboundVideoMode);
+}
+
+function lazyMediaPayload(message, mediaInfo, source) {
+  const fileName = mediaInfo.fileName || `whatsapp-${message.key?.id || Date.now()}${extensionFromMime(mediaInfo.mimeType) || ".mp4"}`;
+  return {
+    originalName: fileName,
+    filename: fileName,
+    mimeType: mediaInfo.mimeType,
+    source,
+    whatsappMessageId: makeMessageExternalId(message.key),
+    lazyDownload: true,
+    downloadStatus: "pending"
+  };
 }
 
 function startPeriodicHistorySync() {
@@ -361,113 +434,54 @@ function scheduleHistorySync(reason, delayMs = 0) {
 }
 
 async function syncRecentMessages(reason = "manual") {
-  if (!whatsappReady) return;
+  if (!whatsappReady || !sock) return;
   if (historySyncInProgress) {
     console.log(`history sync skipped (${reason}): previous sync is still running`);
     return;
   }
   historySyncInProgress = true;
-  console.log(`starting history sync (${reason})`);
   try {
-    const chats = await whatsapp.getChats();
-    const recentChats = chats
-      .filter((chat) => chat?.id?._serialized)
-      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
-      .slice(0, config.historySyncChatLimit);
-    let synced = 0;
-
-    for (const chat of recentChats) {
-      try {
-        const messages = await chat.fetchMessages({ limit: config.historySyncMessageLimit });
-        for (const message of messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))) {
-          await emitHubMessage(message, "history_sync");
-          synced += 1;
-        }
-      } catch (error) {
-        console.error(`failed to sync chat ${chat.id?._serialized || "unknown"}: ${error.message}`);
-      }
-    }
-
-    console.log(`history sync completed (${reason}): ${synced} messages from ${recentChats.length} chats`);
+    const chatIds = Array.from(knownChats.values())
+      .filter((chat) => chat?.id)
+      .sort((a, b) => Number(b.conversationTimestamp || b.timestamp || 0) - Number(a.conversationTimestamp || a.timestamp || 0))
+      .slice(0, config.historySyncChatLimit)
+      .map((chat) => chat.id);
+    console.log(`history sync (${reason}): Baileys live messages are event-driven; cached chats=${chatIds.length}`);
   } finally {
     historySyncInProgress = false;
   }
 }
 
-function safeFileName(value) {
-  return String(value || "client").replace(/[^a-zA-Z0-9_.-]/g, "-");
+function scheduleReconnect(reason) {
+  if (reconnectTimer) return;
+  console.warn(`scheduling Baileys reconnect: ${reason}`);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectBaileys().catch((error) => {
+      console.error(`failed to reconnect Baileys: ${error.message}`);
+      scheduleReconnect(error.message);
+    });
+  }, 3_000);
+  reconnectTimer.unref?.();
 }
 
-function normalizeChatId(value) {
-  const target = String(value || "").trim();
-  if (target.includes("@")) return target;
-  const digits = target.replace(/\D/g, "");
-  if (!digits) throw new Error("message target is empty or invalid");
-  return `${digits}@c.us`;
-}
-
-function numberFromEnv(name, fallback) {
-  const value = Number(process.env[name]);
-  return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-async function resolveMessageContact(message) {
-  const contactId = message.fromMe ? message.to : (message.author || message.from);
-  if (contactId) {
-    try {
-      return await whatsapp.getContactById(contactId);
-    } catch {
-      // Fall through to the message helper. Some group and newsletter ids do not
-      // resolve cleanly through getContactById.
-    }
-  }
+async function saveQr(qr) {
+  if (config.printQrInTerminal) qrcodeTerminal.generate(qr, { small: true });
   try {
-    return await message.getContact();
-  } catch {
-    return null;
+    await fsp.mkdir(config.qrOutputDir, { recursive: true });
+    const clientQrPath = path.join(config.qrOutputDir, `whatsapp-qr-${safeFileName(config.clientId)}.png`);
+    const latestQrPath = path.join(config.qrOutputDir, "whatsapp-qr-latest.png");
+    await QRCode.toFile(clientQrPath, qr, { width: 420, margin: 2 });
+    await QRCode.toFile(latestQrPath, qr, { width: 420, margin: 2 });
+    console.log(`QR image saved: ${clientQrPath}`);
+    console.log(`Latest QR image: ${latestQrPath}`);
+  } catch (error) {
+    console.error(`failed to save QR image: ${error.message}`);
   }
-}
-
-async function emitHubMessage(message, source, options = {}) {
-  rememberRecentMessage(message);
-  const contact = await resolveMessageContact(message);
-  const contactInfo = serializeContact(contact);
-  const media = options.media || await uploadInboundMedia(message, source);
-  const direction = message.fromMe ? "outbound" : "inbound";
-  const chatId = message.fromMe ? message.to : message.from;
-  const peerId = message.fromMe ? message.to : (message.author || message.from);
-  const peerPhone = contactInfo?.number || contactInfo?.phone || null;
-  const ownPhone = whatsapp.info?.wid?.user || null;
-
-  socket.emit("message:created", {
-    clientId: config.clientId,
-    externalId: message.id?._serialized,
-    direction,
-    chatId,
-    sender: message.fromMe ? (ownPhone || message.from) : (peerPhone || peerId),
-    recipient: message.fromMe ? (peerPhone || message.to) : (ownPhone || message.to),
-    body: message.body || media?.originalName || "",
-    messageType: media ? "media" : message.type,
-    createdAt: message.timestamp ? new Date(message.timestamp * 1000).toISOString() : new Date().toISOString(),
-    payload: {
-      from: message.from,
-      to: message.to,
-      author: message.author,
-      source,
-      senderId: message.fromMe ? (whatsapp.info?.wid?._serialized || message.from) : peerId,
-      senderPhone: message.fromMe ? ownPhone : peerPhone,
-      recipientPhone: message.fromMe ? peerPhone : ownPhone,
-      contact: contactInfo,
-      media,
-      caption: message.body || "",
-      hasMedia: message.hasMedia,
-      type: message.type
-    }
-  });
 }
 
 function rememberRecentMessage(message) {
-  const id = message.id?._serialized;
+  const id = makeMessageExternalId(message.key);
   if (!id) return;
   recentMessages.set(id, message);
   if (recentMessages.size > 500) {
@@ -476,27 +490,83 @@ function rememberRecentMessage(message) {
   }
 }
 
-function shouldLazyInboundMedia(message) {
-  if (message.type !== "video") return false;
-  return ["lazy", "thumbnail", "metadata"].includes(config.inboundVideoMode);
+function rememberChat(chat) {
+  const id = chat?.id || chat?.jid;
+  if (!id) return;
+  knownChats.set(jidNormalizedUser(id), { ...chat, id: jidNormalizedUser(id) });
 }
 
-function lazyMediaPayload(message, source) {
-  const mimeType = message._data?.mimetype || "video/mp4";
-  const fileName = message._data?.filename
-    || `whatsapp-${message.id?.id || Date.now()}${extensionFromMime(mimeType) || ".mp4"}`;
+function rememberContact(contact) {
+  const id = contact?.id || contact?.jid;
+  if (!id) return;
+  knownContacts.set(jidNormalizedUser(id), contact);
+}
+
+function serializeContact(jid) {
+  const normalized = jid ? jidNormalizedUser(jid) : "";
+  const contact = knownContacts.get(normalized) || {};
   return {
-    originalName: fileName,
-    filename: fileName,
-    mimeType,
-    source,
-    whatsappMessageId: message.id?._serialized || null,
-    lazyDownload: true,
-    downloadStatus: "pending"
+    id: normalized || null,
+    server: normalized.includes("@") ? normalized.split("@")[1] : null,
+    user: normalized.includes("@") ? normalized.split("@")[0] : normalized || null,
+    number: jidToPhone(normalized),
+    name: contact.name || contact.notify || contact.verifiedName || null,
+    pushname: contact.notify || contact.name || null,
+    shortName: contact.short || null,
+    isBusiness: Boolean(contact.verifiedName || contact.biz)
   };
 }
 
-function extensionFromMime(mimeType) {
+function makeMessageExternalId(key = {}) {
+  if (!key.id) return null;
+  return [key.remoteJid, key.id, key.participant || "", key.fromMe ? "fromMe" : ""].filter(Boolean).join(":");
+}
+
+function normalizeChatId(value) {
+  const target = String(value || "").trim();
+  if (!target) throw new Error("message target is empty or invalid");
+  if (target.includes("@")) return jidNormalizedUser(target);
+  const digits = target.replace(/\D/g, "");
+  if (!digits) throw new Error("message target is empty or invalid");
+  return `${digits}@s.whatsapp.net`;
+}
+
+function buildProxyUrl(proxyUrl, username, password) {
+  if (!proxyUrl) return "";
+  if (!username && !password) return proxyUrl;
+  try {
+    const url = new URL(proxyUrl);
+    if (username) url.username = username;
+    if (password) url.password = password;
+    return url.toString();
+  } catch {
+    return proxyUrl;
+  }
+}
+
+function maskProxyUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.username) url.username = "***";
+    if (url.password) url.password = "***";
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
+
+function jidToPhone(jid) {
+  const normalized = String(jid || "");
+  if (!normalized.endsWith("@s.whatsapp.net")) return null;
+  const digits = normalized.split("@")[0].replace(/\D/g, "");
+  return digits || null;
+}
+
+function ownPhone() {
+  return jidToPhone(sock?.user?.id) || sock?.user?.id?.split(":")[0]?.replace(/\D/g, "") || null;
+}
+
+function extensionFromMime(mimeType = "") {
   const map = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
@@ -511,95 +581,37 @@ function extensionFromMime(mimeType) {
   return map[mimeType] || "";
 }
 
-function isDownloadableMessageMedia(message) {
-  const downloadableTypes = new Set([
-    "image",
-    "video",
-    "audio",
-    "ptt",
-    "document",
-    "sticker"
-  ]);
-  if (downloadableTypes.has(message.type)) return true;
-  const mimeType = message._data?.mimetype;
-  return Boolean(mimeType && message.type !== "interactive");
-}
-
-function isUnsupportedMediaError(error) {
-  return /webMediaType is invalid|media.*invalid|unsupported/i.test(error?.message || "");
-}
-
-function isRecoverableBrowserContextError(error) {
-  return /detached Frame|Execution context was destroyed|Cannot find context with specified id|Target closed|Session closed|Protocol error/i.test(error?.message || "");
-}
-
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function serializeContact(contact) {
-  if (!contact) return null;
+function defaultMimeType(type) {
   return {
-    id: contact.id?._serialized || null,
-    server: contact.id?.server || null,
-    user: contact.id?.user || null,
-    number: contact.number || null,
-    name: contact.name || null,
-    pushname: contact.pushname || null,
-    shortName: contact.shortName || null,
-    isBusiness: Boolean(contact.isBusiness),
-    isEnterprise: Boolean(contact.isEnterprise),
-    isGroup: Boolean(contact.isGroup),
-    isMe: Boolean(contact.isMe),
-    isMyContact: Boolean(contact.isMyContact),
-    isUser: Boolean(contact.isUser),
-    isWAContact: Boolean(contact.isWAContact)
-  };
+    image: "image/jpeg",
+    video: "video/mp4",
+    audio: "audio/ogg",
+    document: "application/octet-stream",
+    sticker: "image/webp"
+  }[type] || "application/octet-stream";
 }
 
-function findInstalledBrowser() {
-  const candidates = browserCandidates();
-  return candidates.find((candidate) => fs.existsSync(candidate)) || "";
+function numberFromEnv(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-function resolveBrowserExecutablePath(configuredPath) {
-  if (configuredPath && fs.existsSync(configuredPath)) {
-    return configuredPath;
-  }
-  if (configuredPath) {
-    console.warn(`PUPPETEER_EXECUTABLE_PATH does not exist: ${configuredPath}`);
-  }
-  return findInstalledBrowser();
+function safeFileName(value) {
+  return String(value || "client").replace(/[^a-zA-Z0-9_.-]/g, "-");
 }
 
-function browserCandidates() {
-  if (process.platform === "win32") {
-    const roots = [
-      process.env.PROGRAMFILES,
-      process.env["PROGRAMFILES(X86)"],
-      process.env.LOCALAPPDATA
-    ].filter(Boolean);
-    return [
-      ...roots.map((root) => path.join(root, "Google", "Chrome", "Application", "chrome.exe")),
-      ...roots.map((root) => path.join(root, "Microsoft", "Edge", "Application", "msedge.exe")),
-      ...roots.map((root) => path.join(root, "Chromium", "Application", "chrome.exe"))
-    ];
-  }
-
-  if (process.platform === "darwin") {
-    return [
-      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-      "/Applications/Chromium.app/Contents/MacOS/Chromium"
-    ];
-  }
-
-  return [
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/google-chrome",
-    "/usr/bin/chromium-browser",
-    "/usr/bin/chromium",
-    "/snap/bin/chromium",
-    "/usr/bin/microsoft-edge-stable"
-  ];
+function isRecoverableBaileysError(error) {
+  return /connection|closed|timed out|socket|stream|restart|required/i.test(error?.message || "");
 }
+
+process.on("SIGINT", async () => {
+  stopPeriodicHistorySync();
+  await sock?.end?.();
+  process.exit(0);
+});
+
+process.on("SIGTERM", async () => {
+  stopPeriodicHistorySync();
+  await sock?.end?.();
+  process.exit(0);
+});

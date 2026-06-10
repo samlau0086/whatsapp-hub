@@ -1116,8 +1116,8 @@ async function createClientConfig(event) {
     clientId,
     name: $("new-client-name").value.trim() || clientId,
     hubUrl: $("new-client-hub-url").value.trim() || window.location.origin,
-    authDataPath: $("new-client-auth-path").value.trim() || `./.wwebjs_auth_${clientId}`,
-    cachePath: $("new-client-cache-path").value.trim() || `./.wwebjs_cache_${clientId}`,
+    authDataPath: $("new-client-auth-path").value.trim() || `./.baileys_auth_${clientId}`,
+    cachePath: $("new-client-cache-path").value.trim() || `./.baileys_store_${clientId}`,
     proxyUrl: $("new-client-proxy-url").value.trim(),
     proxyUsername: $("new-client-proxy-username").value.trim(),
     proxyPassword: $("new-client-proxy-password").value,
@@ -1189,8 +1189,8 @@ function bindEvents() {
   $("new-client-id")?.addEventListener("input", () => {
     const clientId = $("new-client-id").value.trim();
     if (!$("new-client-name").value.trim()) $("new-client-name").placeholder = clientId ? clientId : "Office PC 01";
-    $("new-client-auth-path").placeholder = clientId ? `./.wwebjs_auth_${clientId}` : "./.wwebjs_auth_office-pc-01";
-    $("new-client-cache-path").placeholder = clientId ? `./.wwebjs_cache_${clientId}` : "./.wwebjs_cache_office-pc-01";
+    $("new-client-auth-path").placeholder = clientId ? `./.baileys_auth_${clientId}` : "./.baileys_auth_office-pc-01";
+    $("new-client-cache-path").placeholder = clientId ? `./.baileys_store_${clientId}` : "./.baileys_store_office-pc-01";
   });
   $("client-deployment")?.addEventListener("click", async (event) => {
     const tab = event.target.closest("[data-deployment-tab]");

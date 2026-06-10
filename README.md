@@ -615,7 +615,7 @@ If the client is online for a short time and then becomes offline while the agen
 
 - Update the Hub to the latest version. The Hub now keeps a client online when the Socket.IO connection is still alive, even if a heartbeat is delayed by history sync or media download.
 - Check the Hub env value `CLIENT_OFFLINE_AFTER_MS`. The default is `45000` ms. On slow VPS/network environments, set it to `120000`.
-- Check the agent log for repeated `connect_error`, `disconnect`, proxy errors, or WhatsApp Web browser crashes.
+- Check the agent log for repeated `connect_error`, `disconnect`, proxy errors, or Baileys connection close messages.
 - When using Nginx/Caddy, make sure WebSocket upgrade headers are configured, otherwise Socket.IO may reconnect repeatedly.
 
 #### 4. 每次启动都要重新扫码
@@ -625,8 +625,8 @@ If the client is online for a short time and then becomes offline while the agen
 请确认：
 
 - `CLIENT_ID` 没变。
-- `WWEBJS_AUTH_DATA_PATH` 没变。
-- 没删除 `.wwebjs_auth_xxx` 目录。
+- `BAILEYS_AUTH_DATA_PATH` 没变。
+- 没删除 `.baileys_auth_xxx` 目录。
 - 没换 Windows 用户运行。
 - 运行脚本的文件夹没有被清理软件删除。
 
@@ -690,7 +690,7 @@ apt upgrade -y
 
 一个用于调度多台内网 WhatsApp client 的 actor hub。推荐部署方式是：Hub 放在公网 VPS，所有内网电脑上的 WhatsApp client agent 主动连出到 VPS Hub。VPS 不需要反向访问内网机器。
 
-`whatsapp-web.js` 是 WhatsApp Web 的非官方 API，生产环境需要自行评估 WhatsApp 风控、封号、隐私和合规风险。
+Client agent 已切换为 Baileys。Baileys 是 WhatsApp Web 协议的非官方实现，生产环境需要自行评估 WhatsApp 风控、封号、隐私和合规风险。切换到 Baileys 后，agent 不再依赖 Chrome、Edge、Puppeteer，但旧 `whatsapp-web.js` 登录态不能直接迁移，每个 client 首次切换需要重新扫码。
 
 ## 架构
 
@@ -783,7 +783,7 @@ HOST_PORT=3000
 
 VPS 需要提前安装 Docker 和 Docker Compose，并允许上述 SSH 用户访问 Docker。首次部署前确认目录存在权限正常，或让 workflow 自动创建 `VPS_DEPLOY_PATH`。Actions 会把该 secret 写成 VPS 上的 `hub.env`，并只把 `HOST_BIND_ADDRESS`、`HOST_PORT`、`PORT` 提供给 Compose 做端口插值，因此 `HUB_API_TOKEN` 里可以包含 `$`。
 
-VPS 镜像只安装 Hub 运行所需依赖，不安装 `whatsapp-web.js` 和 Puppeteer。内网电脑运行 agent 时使用普通 `npm install`，会安装这些 optional dependencies。
+VPS 镜像只安装 Hub 运行所需依赖。内网电脑运行 agent 时使用普通 `npm install`，会安装 Baileys agent 需要的依赖；Baileys agent 不需要 Chrome、Edge 或 Puppeteer。
 
 ## Web 登录和权限
 
@@ -844,11 +844,11 @@ server {
 
 ## 内网 WhatsApp Client Agent
 
-Agent 脚本位于 `agents/wwebjs-client/index.js`，通过 `npm run agent` 启动。每台运行 WhatsApp Web 的内网电脑都运行一个 agent。它只需要能访问 VPS 的 HTTPS 地址，不需要公网 IP，也不需要开放任何入站端口。
+Agent 脚本位于 `agents/wwebjs-client/index.js`，通过 `npm run agent` 启动。文件路径为了兼容旧部署暂时保留 `wwebjs-client` 名称，但实际实现已经是 Baileys。每台运行 WhatsApp 的内网电脑都运行一个 agent。它只需要能访问 VPS 的 HTTPS 地址，不需要公网 IP，也不需要开放任何入站端口。
 
 Agent 做的事情：
 
-- 使用 `whatsapp-web.js` 启动 WhatsApp Web client。
+- 使用 Baileys 连接 WhatsApp Web 协议，不启动浏览器。
 - 首次运行在终端打印二维码，扫码后保存登录会话。
 - 通过 Socket.IO 主动连接 VPS Hub。
 - 向 Hub 注册 `CLIENT_ID`、名称、手机号和在线状态。
@@ -964,7 +964,7 @@ npm -v
 
 #### npm install 网络失败时怎么办
 
-在 agent 文件夹里执行 `npm install` 时，如果出现下载失败、超时、Puppeteer/Chrome 下载失败，可以按下面顺序处理。
+在 agent 文件夹里执行 `npm install` 时，如果出现下载失败或超时，可以按下面顺序处理。Baileys 版 agent 不会下载 Chrome/Puppeteer，通常只需要解决 npm registry 网络问题。
 
 第一步：清理 npm 缓存后重试。
 
@@ -986,31 +986,7 @@ npm install
 npm config set registry https://registry.npmjs.org
 ```
 
-第三步：如果失败点是 Puppeteer 下载 Chrome，可以使用本机已经安装好的 Chrome / Edge，并跳过 Puppeteer 自动下载。
-
-Windows 常见路径：
-
-```text
-C:\Program Files\Google\Chrome\Application\chrome.exe
-C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
-```
-
-在 `.env` 里填写：
-
-```bash
-PUPPETEER_SKIP_DOWNLOAD=true
-PUPPETEER_EXECUTABLE_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
-```
-
-然后重新执行：
-
-```bash
-npm install
-```
-
-如果你使用的是生成的 Windows `xxx-install.bat`，也可以先手动安装 Chrome 或 Edge，再重新运行安装 BAT。脚本会优先使用 `.env` 里配置的 `PUPPETEER_EXECUTABLE_PATH`。
-
-第四步：如果 `node_modules` 目录已经安装到一半，导致反复失败，可以删除 agent 文件夹里的 `node_modules` 和 `package-lock.json` 后重试。
+第三步：如果 `node_modules` 目录已经安装到一半，导致反复失败，可以删除 agent 文件夹里的 `node_modules` 和 `package-lock.json` 后重试。
 
 Windows PowerShell：
 
@@ -1031,64 +1007,28 @@ npm install
 
 - `node -v` 不显示版本：Node.js 没安装成功，或终端没有刷新 PATH。
 - `npm -v` 不显示版本：npm 没安装成功，建议重新安装 Node.js LTS。
-- `npm install` 卡住很久：多半是网络访问 npm 或 Chrome 下载源很慢，可以切换 npm registry，或配置 `PUPPETEER_EXECUTABLE_PATH`。
-- Windows 报 `EPERM`、`operation not permitted`：关闭正在运行的 agent、Chrome、杀毒软件拦截窗口，再重新运行安装命令。
+- `npm install` 卡住很久：多半是网络访问 npm registry 很慢，可以切换 npm registry。
+- Windows 报 `EPERM`、`operation not permitted`：关闭正在运行的 agent、杀毒软件拦截窗口，再重新运行安装命令。
 - 已经手动装好 Node.js 后：重新打开终端，再运行生成的 `xxx-install.bat` 或 `npm install`。
 
-#### 运行时报 Could not find Chrome 怎么办
+#### Baileys 切换后需要重新扫码
 
-如果启动 client agent 时看到类似错误：
-
-```text
-Error: Could not find Chrome (ver. 146.0.7680.31)
-your cache path is incorrectly configured: .puppeteer-cache
-```
-
-说明 Puppeteer 没找到可用的 Chrome。常见原因是安装依赖时 Chrome 下载失败，或者 `.puppeteer-cache` 目录里只有半下载的文件。
-
-优先处理方式：
-
-1. 在这台电脑上安装 Google Chrome 或 Microsoft Edge。
-2. 重新下载或更新最新的 `wwebjs-client.js`。
-3. 重新运行生成的 `xxx-install.bat`，或者直接运行 `start-agent.bat`。
-
-新版 agent 会自动寻找本机已安装的 Chrome / Edge。Windows 常见自动识别路径包括：
-
-```text
-C:\Program Files\Google\Chrome\Application\chrome.exe
-C:\Program Files (x86)\Google\Chrome\Application\chrome.exe
-C:\Users\你的用户名\AppData\Local\Google\Chrome\Application\chrome.exe
-C:\Program Files\Microsoft\Edge\Application\msedge.exe
-C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
-```
-
-如果仍然找不到，可以在 agent 文件夹的 `.env` 里手动填写：
-
-```bash
-PUPPETEER_EXECUTABLE_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
-PUPPETEER_SKIP_DOWNLOAD=true
-```
-
-如果你使用 Edge：
-
-```bash
-PUPPETEER_EXECUTABLE_PATH=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
-PUPPETEER_SKIP_DOWNLOAD=true
-```
-
-然后重新运行：
+Baileys 的登录态目录和旧 `whatsapp-web.js` 的 `.wwebjs_auth` 不兼容。升级到 Baileys 后，首次启动会重新生成二维码：
 
 ```text
 start-agent.bat
 ```
 
-如果 `.puppeteer-cache` 里有半下载内容，也可以删除后重试：
+扫码成功后会生成 `.baileys_auth` 目录。以后只要保留这个目录、`CLIENT_ID` 不变、启动用户有读写权限，通常不需要再次扫码。
 
-```powershell
-Remove-Item -Recurse -Force .\.puppeteer-cache -ErrorAction SilentlyContinue
-```
+如果反复要求扫码，可以检查：
 
-注意：如果这台电脑完全没有安装 Chrome / Edge，并且网络又无法下载 Puppeteer Chrome，client agent 就无法启动 WhatsApp Web。最简单的办法是先手动安装 Google Chrome 或 Microsoft Edge。
+- `.env` 里的 `BAILEYS_AUTH_DATA_PATH` 是否固定。
+- 是否删除过 `.baileys_auth_xxx` 或 `.baileys_auth` 目录。
+- 是否用不同 Windows 用户或不同工作目录启动。
+- `CLIENT_ID` 是否变化。
+
+注意：Baileys 版 agent 不需要安装 Chrome / Edge，也不会下载 Puppeteer Chrome。内网电脑只需要 Node.js、npm 和能访问 WhatsApp 网络的出口。
 
 ### Agent 环境变量
 
@@ -1099,12 +1039,11 @@ HUB_URL=https://ws.geekmt.com
 CLIENT_ID=office-pc-01
 CLIENT_NAME=Office PC 01
 CLIENT_TOKEN=replace-with-the-same-value-as-HUB_API_TOKEN
-WWEBJS_AUTH_DATA_PATH=./.wwebjs_auth
-WWEBJS_CACHE_PATH=./.wwebjs_cache
+BAILEYS_AUTH_DATA_PATH=./.baileys_auth
+BAILEYS_STORE_PATH=./.baileys_store
 CLIENT_PROXY_URL=
 CLIENT_PROXY_USERNAME=
 CLIENT_PROXY_PASSWORD=
-PUPPETEER_HEADLESS=false
 HISTORY_SYNC_ON_READY=true
 HISTORY_SYNC_CHAT_LIMIT=50
 HISTORY_SYNC_MESSAGE_LIMIT=30
@@ -1117,12 +1056,11 @@ HISTORY_SYNC_INTERVAL_MS=300000
 - `CLIENT_ID`: 当前内网电脑的唯一 ID。每台电脑必须不同，例如 `office-pc-01`、`store-pc-02`。
 - `CLIENT_NAME`: Web 中控显示名称。
 - `CLIENT_TOKEN`: 必须等于 VPS Hub 的 `HUB_API_TOKEN`。
-- `WWEBJS_AUTH_DATA_PATH`: WhatsApp Web 登录态保存目录。必须持久化，不能每次启动换目录或删除。
-- `WWEBJS_CACHE_PATH`: WhatsApp Web 版本缓存目录。
+- `BAILEYS_AUTH_DATA_PATH`: Baileys 登录态保存目录。必须持久化，不能每次启动换目录或删除。旧变量 `WWEBJS_AUTH_DATA_PATH` 仍兼容，但建议新部署使用 `BAILEYS_AUTH_DATA_PATH`。
+- `BAILEYS_STORE_PATH`: Baileys 本地缓存目录。旧变量 `WWEBJS_CACHE_PATH` 仍兼容。
 - `CLIENT_PROXY_URL`: 当前 client 使用的代理，例如 `http://127.0.0.1:7890`、`socks5://127.0.0.1:1080`。
 - `CLIENT_PROXY_USERNAME`: 代理用户名，没有认证可留空。
 - `CLIENT_PROXY_PASSWORD`: 代理密码，没有认证可留空。
-- `PUPPETEER_HEADLESS`: 首次调试建议 `false`，稳定后可改为 `true`。
 - `HISTORY_SYNC_ON_READY`: agent 启动并 ready 后是否主动补拉最近聊天记录，建议保持 `true`。
 - `HISTORY_SYNC_CHAT_LIMIT`: 每次上线补拉最近多少个会话，默认 `50`。
 - `HISTORY_SYNC_MESSAGE_LIMIT`: 每个会话补拉最近多少条消息，默认 `30`。
@@ -1140,11 +1078,11 @@ npm run agent
 
 ### 保留 WhatsApp 登录态
 
-Agent 使用 `whatsapp-web.js` 的 `LocalAuth` 保存登录态。默认保存到项目目录下：
+Agent 使用 Baileys multi-file auth 保存登录态。默认保存到项目目录下：
 
 ```text
-.wwebjs_auth/
-.wwebjs_cache/
+.baileys_auth/
+.baileys_store/
 ```
 
 只要这两个目录保留、`CLIENT_ID` 不变、启动用户有读写权限，下一次启动通常不需要重新扫码。
@@ -1152,8 +1090,8 @@ Agent 使用 `whatsapp-web.js` 的 `LocalAuth` 保存登录态。默认保存到
 如果你用 PM2、Windows 任务计划、服务管理器或从不同目录启动 agent，建议使用绝对路径：
 
 ```bash
-WWEBJS_AUTH_DATA_PATH=C:/whatsapp-hub-data/auth
-WWEBJS_CACHE_PATH=C:/whatsapp-hub-data/cache
+BAILEYS_AUTH_DATA_PATH=C:/whatsapp-hub-data/auth
+BAILEYS_STORE_PATH=C:/whatsapp-hub-data/store
 ```
 
 不要把这些目录放进临时目录，也不要在更新代码时删除它们。每台内网电脑可以有自己的保存目录；同一台电脑上多个 client 也必须使用不同的 `CLIENT_ID`。
@@ -1164,8 +1102,8 @@ WWEBJS_CACHE_PATH=C:/whatsapp-hub-data/cache
 
 - 不同的 `CLIENT_ID`
 - 不同的 `CLIENT_NAME`
-- 不同的 `WWEBJS_AUTH_DATA_PATH`
-- 不同的 `WWEBJS_CACHE_PATH`
+- 不同的 `BAILEYS_AUTH_DATA_PATH`
+- 不同的 `BAILEYS_STORE_PATH`
 - 如需隔离网络出口，配置不同的 `CLIENT_PROXY_URL`
 
 示例一：
@@ -1175,10 +1113,9 @@ HUB_URL=https://ws.geekmt.com
 CLIENT_ID=office-pc-01
 CLIENT_NAME=Office PC 01
 CLIENT_TOKEN=replace-with-the-same-value-as-HUB_API_TOKEN
-WWEBJS_AUTH_DATA_PATH=C:/whatsapp-hub-data/office-pc-01/auth
-WWEBJS_CACHE_PATH=C:/whatsapp-hub-data/office-pc-01/cache
+BAILEYS_AUTH_DATA_PATH=C:/whatsapp-hub-data/office-pc-01/auth
+BAILEYS_STORE_PATH=C:/whatsapp-hub-data/office-pc-01/store
 CLIENT_PROXY_URL=socks5://127.0.0.1:1081
-PUPPETEER_HEADLESS=false
 ```
 
 示例二：
@@ -1188,10 +1125,9 @@ HUB_URL=https://ws.geekmt.com
 CLIENT_ID=office-pc-02
 CLIENT_NAME=Office PC 02
 CLIENT_TOKEN=replace-with-the-same-value-as-HUB_API_TOKEN
-WWEBJS_AUTH_DATA_PATH=C:/whatsapp-hub-data/office-pc-02/auth
-WWEBJS_CACHE_PATH=C:/whatsapp-hub-data/office-pc-02/cache
+BAILEYS_AUTH_DATA_PATH=C:/whatsapp-hub-data/office-pc-02/auth
+BAILEYS_STORE_PATH=C:/whatsapp-hub-data/office-pc-02/store
 CLIENT_PROXY_URL=http://127.0.0.1:7890
-PUPPETEER_HEADLESS=false
 ```
 
 如果代理需要账号密码：
@@ -1202,7 +1138,7 @@ CLIENT_PROXY_USERNAME=my-user
 CLIENT_PROXY_PASSWORD=my-password
 ```
 
-代理由 Chromium/Puppeteer 使用，用于 WhatsApp Web 页面访问；Hub 的 Socket.IO 连接仍按系统网络直接连接 VPS。
+代理由 Baileys 的 WhatsApp 连接使用；Hub 的 Socket.IO 连接仍按系统网络直接连接 VPS。
 
 ### Windows 持续运行
 
@@ -1221,7 +1157,7 @@ pm2 start agents/wwebjs-client/index.js --name whatsapp-agent-office-pc-01
 pm2 save
 ```
 
-如果使用 PM2，请确保运行命令的目录里存在 `.env`，并且该 Windows 用户有权限读写 `WWEBJS_AUTH_DATA_PATH` 和 `WWEBJS_CACHE_PATH`。也可以显式指定工作目录：
+如果使用 PM2，请确保运行命令的目录里存在 `.env`，并且该 Windows 用户有权限读写 `BAILEYS_AUTH_DATA_PATH` 和 `BAILEYS_STORE_PATH`。也可以显式指定工作目录：
 
 ```powershell
 pm2 start agents/wwebjs-client/index.js --name whatsapp-agent-office-pc-01 --cwd C:\path\to\whatsapp-hub
@@ -1245,8 +1181,8 @@ curl -H "x-hub-token: replace-with-the-same-value-as-HUB_API_TOKEN" https://ws.g
 
 - 每台内网电脑使用不同的 `CLIENT_ID`，否则后上线的连接会覆盖前一个同 ID client。
 - 不要在 VPS 容器里运行 `npm run agent`。VPS 只运行 Hub，agent 应运行在实际登录 WhatsApp 的内网电脑上。
-- 如果 WhatsApp 退出登录或二维码过期，重新运行 agent 并扫码。若每次都要求扫码，优先检查 `WWEBJS_AUTH_DATA_PATH` 是否固定、目录是否被删除、`CLIENT_ID` 是否变化、启动用户是否有权限。
-- `whatsapp-web.js` 使用非官方 WhatsApp Web 接口，请控制发送频率，避免异常批量行为。
+- 如果 WhatsApp 退出登录或二维码过期，重新运行 agent 并扫码。若每次都要求扫码，优先检查 `BAILEYS_AUTH_DATA_PATH` 是否固定、目录是否被删除、`CLIENT_ID` 是否变化、启动用户是否有权限。
+- Baileys 使用非官方 WhatsApp Web 协议，请控制发送频率，避免异常批量行为。
 
 ## API
 
@@ -1453,7 +1389,7 @@ curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/
       "phone": "15551234567",
       "status": "online",
       "metadata": {
-        "platform": "whatsapp-web.js",
+        "platform": "baileys",
         "pushname": "Sales"
       },
       "created_at": "2026-06-01T09:50:00.000Z",
@@ -1532,8 +1468,8 @@ curl -H "x-hub-token: replace-with-a-long-random-token" https://hub.example.com/
 
 1. 打开 Web 后台 `Task Timeline`，查看任务卡片里的 `Failure reason`。
 2. 调用 `GET /api/tasks/<task-id>`，查看返回里的 `error` 和 `result`。
-3. 如果 `error` 为空，说明 client agent 没有把详细错误回传给 Hub，常见原因是 agent 进程崩溃、Socket.IO 断开、电脑休眠、Chrome/WhatsApp Web 被关闭。
-4. 到运行该 client 的内网电脑查看 agent 终端日志，重点找 `task failed`、`send failed`、`Evaluation failed`、`ProtocolError`、`Could not find Chrome`、`connect_error` 等关键字。
+3. 如果 `error` 为空，说明 client agent 没有把详细错误回传给 Hub，常见原因是 agent 进程崩溃、Socket.IO 断开、电脑休眠、Baileys 连接关闭。
+4. 到运行该 client 的内网电脑查看 agent 终端日志，重点找 `send failed`、`connection closed`、`logged out`、`stream errored`、`connect_error` 等关键字。
 5. 如果错误包含 `invalid wid`、`not a valid WhatsApp ID` 或发送后客户收不到，优先检查手机号和 `chatId -> phone` 映射是否正确。
 6. 如果错误和媒体相关，检查 `/uploads/...` 是否可被该 client 下载，以及 token 是否有 `uploads:create` 或对应 agent 权限。
 7. 修正后可以在 Web 后台把任务手动 `Assign` 给在线 client，或重新调用发送接口创建新任务。
@@ -1969,12 +1905,11 @@ Agent:
 - `CLIENT_ID`: client 唯一 ID。
 - `CLIENT_NAME`: 中控显示名称。
 - `CLIENT_TOKEN`: 连接 hub 的 token，应与 `HUB_API_TOKEN` 一致。
-- `WWEBJS_AUTH_DATA_PATH`: WhatsApp Web 登录态保存目录。
-- `WWEBJS_CACHE_PATH`: WhatsApp Web 缓存目录。
-- `CLIENT_PROXY_URL`: WhatsApp Web 访问代理。
+- `BAILEYS_AUTH_DATA_PATH`: Baileys 登录态保存目录。旧 `WWEBJS_AUTH_DATA_PATH` 仍兼容。
+- `BAILEYS_STORE_PATH`: Baileys 本地缓存目录。旧 `WWEBJS_CACHE_PATH` 仍兼容。
+- `CLIENT_PROXY_URL`: WhatsApp 连接代理，例如 `http://...` 或 `socks5://...`。
 - `CLIENT_PROXY_USERNAME`: 代理用户名。
 - `CLIENT_PROXY_PASSWORD`: 代理密码。
-- `PUPPETEER_HEADLESS`: 是否无头运行 Chromium。
 - `HISTORY_SYNC_ON_READY`: agent ready 后是否补拉最近聊天记录，建议保持 `true`。
 - `HISTORY_SYNC_CHAT_LIMIT`: 每次补偿同步扫描最近多少个会话。
 - `HISTORY_SYNC_MESSAGE_LIMIT`: 每个会话补偿同步最近多少条消息。
@@ -1988,7 +1923,7 @@ Agent:
 2. 保存后 Hub 会预注册一个 offline client，并生成该 client 专用的 agent token。
 3. 页面会显示个性化部署说明，内网电脑只需要下载：
    - `/agent/package.json`
-   - `/agent/wwebjs-client.js`
+   - `/agent/baileys-client.js`
    - 生成的 `.env`
 
 这样内网电脑无需下载整个 hub 项目代码。生成的 token 只在创建后显示在部署说明中；若丢失，建议重新创建 client 配置或生成新的 agent token。
@@ -2023,7 +1958,7 @@ Agent:
 - Add per-client health metrics: heartbeat latency, socket reconnect count, WhatsApp ready state, QR/auth state, browser process state, and last media sync error.
 - Add alerting when a client repeatedly flips online/offline or has queued tasks for too long.
 - Add configurable history sync throttling so slow machines can limit chats/messages/media downloaded per minute.
-- Add a client-side watchdog script or service mode for Windows to restart the agent if Node/Chrome crashes.
+- Add a client-side watchdog script or service mode for Windows to restart the agent if Node/Baileys crashes.
 - Add a safer deployment/update command for client agents that updates files without deleting auth/cache/session directories.
 
 ### Routing And Scheduling
