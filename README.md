@@ -613,6 +613,7 @@ curl https://ws.example.com/api/auth/check \
 
 If the client is online for a short time and then becomes offline while the agent is still running, check these items:
 
+- `Hub socket connected` or `Hub registered client ... as offline` only means the agent can reach the VPS Hub. It does not mean WhatsApp is ready. The client becomes online only after Baileys logs ready/open and Hub receives `client:hello` with `online`.
 - Update the Hub to the latest version. The Hub now keeps a client online when the Socket.IO connection is still alive, even if a heartbeat is delayed by history sync or media download.
 - Check the Hub env value `CLIENT_OFFLINE_AFTER_MS`. The default is `45000` ms. On slow VPS/network environments, set it to `120000`.
 - Check the agent log for repeated `connect_error`, `disconnect`, proxy errors, or Baileys connection close messages.
@@ -1084,6 +1085,8 @@ npm run agent
 ```
 
 首次运行会在终端显示二维码，用手机 WhatsApp 扫码登录。扫码成功后，Web 中控的 Clients 列表应看到该 `CLIENT_ID` 在线。
+
+如果只看到 `Hub socket connected`，但没有二维码，通常是 Baileys 还没有成功连接 WhatsApp WebSocket。请先检查 `CLIENT_PROXY_URL`，因为二维码是在 WhatsApp WebSocket 握手成功后才会下发。
 
 ### 保留 WhatsApp 登录态
 

@@ -58,16 +58,23 @@ export function createHub(httpServer) {
         previousSocket.disconnect(true);
       }
       socket.data.clientId = id;
-      socketsByClient.set(id, socket.id);
+      const status = payload.status === "online" ? "online" : "offline";
+      if (status === "online") {
+        socketsByClient.set(id, socket.id);
+      } else {
+        socketsByClient.delete(id);
+      }
       const client = upsertClient({
         id,
         name: payload.name || id,
         phone: payload.phone || null,
         metadata: payload.metadata || {},
-        status: "online"
+        status
       });
       io.emit("client:updated", client);
-      dispatchQueuedTasksForClient(id).catch((error) => console.error("failed to dispatch queued tasks", error));
+      if (status === "online") {
+        dispatchQueuedTasksForClient(id).catch((error) => console.error("failed to dispatch queued tasks", error));
+      }
       ack?.({ ok: true, client });
     });
 

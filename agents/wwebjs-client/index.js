@@ -71,6 +71,7 @@ console.log(`history sync interval: ${config.historySyncOnReady ? `${config.hist
 console.log(`baileys connect timeout: ${config.connectTimeoutMs} ms`);
 
 socket.on("connect", () => {
+  console.log(`Hub socket connected; WhatsApp is ${whatsappReady ? "ready" : "not ready yet"}`);
   emitHello(whatsappReady ? "online" : "offline");
   if (whatsappReady) scheduleHistorySync("socket_reconnect", 2_000);
 });
