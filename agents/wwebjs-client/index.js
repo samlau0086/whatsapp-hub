@@ -19,6 +19,8 @@ import { io } from "socket.io-client";
 
 dotenv.config();
 
+const AGENT_VERSION = "baileys-2026-06-12.2";
+
 const config = {
   hubUrl: process.env.HUB_URL || "http://localhost:3000",
   token: process.env.CLIENT_TOKEN || process.env.HUB_API_TOKEN || "dev-token",
@@ -62,6 +64,7 @@ const recentMessages = new Map();
 const knownChats = new Map();
 const knownContacts = new Map();
 
+console.log(`whatsapp hub agent version: ${AGENT_VERSION}`);
 console.log(`baileys auth data path: ${config.authDataPath}`);
 console.log(`baileys store path: ${config.cachePath}`);
 console.log(`whatsapp proxy: ${proxyUrl ? maskProxyUrl(proxyUrl) : "disabled"}`);

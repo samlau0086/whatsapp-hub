@@ -808,7 +808,7 @@ function editableClientConfig(clientConfig) {
 function agentPackageJson() {
   return {
     name: "whatsapp-hub-client-agent",
-    version: "0.1.0",
+    version: "0.2.0-baileys.2",
     private: true,
     type: "module",
     scripts: {

@@ -757,7 +757,9 @@ docker compose up -d --build
 
 ## GitHub Actions 自动部署
 
-仓库已包含 `.github/workflows/deploy-vps.yml`。推送到 `main` 或手动运行 workflow 时，GitHub Actions 会打包项目，通过 SSH 上传到 VPS，然后执行 `docker compose up -d --build --remove-orphans`。
+仓库已包含 `.github/workflows/deploy-vps.yml`。推送到 `main` 或手动运行 workflow 时，GitHub Actions 会在 Actions runner 上构建 Docker 镜像，打包项目和镜像，通过 SSH 上传到 VPS，然后在 VPS 上执行 `docker load` 和 `docker compose up -d --no-build --remove-orphans`。
+
+这样 VPS 不需要访问 Docker Hub 拉取 `node:22-bookworm-slim`。如果 VPS 出现 `lookup registry-1.docker.io ... server misbehaving` 这类 DNS 错误，自动部署仍然可以继续，因为基础镜像拉取和构建已经转移到 GitHub Actions runner 上完成。
 
 在 GitHub 仓库的 `Settings -> Secrets and variables -> Actions -> Repository secrets` 添加：
 

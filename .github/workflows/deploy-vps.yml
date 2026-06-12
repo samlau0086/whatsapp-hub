@@ -45,7 +45,15 @@ jobs:
             --exclude='.env' \
             --exclude='.wwebjs_auth' \
             --exclude='.wwebjs_cache' \
+            --exclude='.baileys_auth' \
+            --exclude='.baileys_store' \
             -czf "$RUNNER_TEMP/whatsapp-hub.tgz" .
+
+      - name: Build Docker image
+        run: |
+          set -eu
+          docker build -t whatsapp-hub-hub:latest .
+          docker save whatsapp-hub-hub:latest | gzip > "$RUNNER_TEMP/whatsapp-hub-image.tgz"
 
       - name: Configure SSH
         run: |
@@ -65,6 +73,7 @@ jobs:
         run: |
           set -eu
           scp -i ~/.ssh/deploy_key -P "$VPS_PORT" "$RUNNER_TEMP/whatsapp-hub.tgz" "$VPS_USER@$VPS_HOST:$VPS_DEPLOY_PATH/.deploy-whatsapp-hub.tgz"
+          scp -i ~/.ssh/deploy_key -P "$VPS_PORT" "$RUNNER_TEMP/whatsapp-hub-image.tgz" "$VPS_USER@$VPS_HOST:$VPS_DEPLOY_PATH/.deploy-whatsapp-hub-image.tgz"
           if [ -n "$VPS_ENV_FILE" ]; then
             printf '%s\n' "$VPS_ENV_FILE" > .env.production
             scp -i ~/.ssh/deploy_key -P "$VPS_PORT" .env.production "$VPS_USER@$VPS_HOST:$VPS_DEPLOY_PATH/hub.env"
@@ -80,9 +89,16 @@ jobs:
             echo "Refusing to deploy to an empty path or /"
             exit 1
           fi
-          find "$DEPLOY_PATH" -mindepth 1 -maxdepth 1 ! -name 'hub.env' ! -name 'data' ! -name '.deploy-whatsapp-hub.tgz' -exec rm -rf {} +
+          find "$DEPLOY_PATH" -mindepth 1 -maxdepth 1 ! -name 'hub.env' ! -name 'data' ! -name '.deploy-whatsapp-hub.tgz' ! -name '.deploy-whatsapp-hub-image.tgz' -exec rm -rf {} +
           tar -xzf .deploy-whatsapp-hub.tgz
           rm -f .deploy-whatsapp-hub.tgz
+
+          if [ ! -f .deploy-whatsapp-hub-image.tgz ]; then
+            echo "Missing uploaded Docker image archive."
+            exit 1
+          fi
+          gzip -dc .deploy-whatsapp-hub-image.tgz | docker load
+          rm -f .deploy-whatsapp-hub-image.tgz
 
           if [ ! -f hub.env ]; then
             echo "Missing $DEPLOY_PATH/hub.env. Add GitHub secret VPS_ENV_FILE or create hub.env on the VPS."
@@ -94,9 +110,9 @@ jobs:
           } > compose.env
 
           if docker compose version >/dev/null 2>&1; then
-            docker compose --env-file compose.env up -d --build --remove-orphans
+            docker compose --env-file compose.env up -d --no-build --remove-orphans
           else
-            docker-compose --env-file compose.env up -d --build --remove-orphans
+            docker-compose --env-file compose.env up -d --no-build --remove-orphans
           fi
 
           docker image prune -f
