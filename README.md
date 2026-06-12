@@ -1202,6 +1202,21 @@ proxy diagnostics: WSS wss://web.whatsapp.com/ws/chat connected
 CLIENT_PROXY_URL=http://127.0.0.1:7898
 ```
 
+Windows 上可以先检查端口是否真的在监听：
+
+```powershell
+netstat -ano | findstr LISTENING | findstr ":7898"
+```
+
+再分别测试 HTTP 和 SOCKS 代理协议：
+
+```powershell
+curl.exe -v -x http://127.0.0.1:7898 https://web.whatsapp.com/ --connect-timeout 15
+curl.exe -v -x socks5h://127.0.0.1:7898 https://web.whatsapp.com/ --connect-timeout 15
+```
+
+哪个命令能返回 HTTP 响应，`CLIENT_PROXY_URL` 就使用哪个协议。两个都超时则说明该代理端口或代理节点不能访问 WhatsApp。
+
 ### Windows 持续运行
 
 开发测试可以直接保持 PowerShell 窗口运行：

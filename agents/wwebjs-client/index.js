@@ -10,6 +10,7 @@ import dotenv from "dotenv";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import https from "node:https";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import Pino from "pino";
@@ -21,7 +22,7 @@ import WebSocket from "ws";
 
 dotenv.config();
 
-const AGENT_VERSION = "baileys-2026-06-12.3";
+const AGENT_VERSION = "baileys-2026-06-12.4";
 
 const config = {
   hubUrl: process.env.HUB_URL || "http://localhost:3000",
@@ -502,8 +503,38 @@ function scheduleReconnect(reason) {
 async function runProxyDiagnostics() {
   const targetDescription = proxyUrl ? `through ${maskProxyUrl(proxyUrl)}` : "without proxy";
   console.log(`proxy diagnostics: testing WhatsApp reachability ${targetDescription}`);
+  if (proxyUrl) await testLocalProxyPort(proxyUrl);
   await testHttpsReachability("https://web.whatsapp.com/");
   await testWebSocketReachability("wss://web.whatsapp.com/ws/chat");
+}
+
+function testLocalProxyPort(value) {
+  return new Promise((resolve) => {
+    let parsed;
+    try {
+      parsed = new URL(value);
+    } catch (error) {
+      console.warn(`proxy diagnostics: invalid CLIENT_PROXY_URL: ${error.message}`);
+      return resolve();
+    }
+    const host = parsed.hostname || "127.0.0.1";
+    const port = Number(parsed.port);
+    if (!port) {
+      console.warn("proxy diagnostics: CLIENT_PROXY_URL has no port");
+      return resolve();
+    }
+    const socket = net.createConnection({ host, port });
+    const done = (message, warn = false) => {
+      socket.destroy();
+      if (warn) console.warn(message);
+      else console.log(message);
+      resolve();
+    };
+    socket.setTimeout(5_000);
+    socket.once("connect", () => done(`proxy diagnostics: local proxy ${host}:${port} is reachable (${parsed.protocol.replace(":", "")})`));
+    socket.once("timeout", () => done(`proxy diagnostics: local proxy ${host}:${port} timed out`, true));
+    socket.once("error", (error) => done(`proxy diagnostics: local proxy ${host}:${port} failed: ${error.message}`, true));
+  });
 }
 
 function testHttpsReachability(url) {
