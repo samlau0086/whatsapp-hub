@@ -1056,6 +1056,7 @@ BAILEYS_CONNECT_TIMEOUT_MS=60000
 BAILEYS_KEEP_ALIVE_INTERVAL_MS=30000
 BAILEYS_RECONNECT_MIN_DELAY_MS=5000
 BAILEYS_RECONNECT_MAX_DELAY_MS=120000
+BAILEYS_PROXY_DIAGNOSTICS=true
 ```
 
 字段说明：
@@ -1077,6 +1078,7 @@ BAILEYS_RECONNECT_MAX_DELAY_MS=120000
 - `BAILEYS_KEEP_ALIVE_INTERVAL_MS`: Baileys WebSocket keepalive 间隔，默认 `30000` 毫秒。
 - `BAILEYS_RECONNECT_MIN_DELAY_MS`: Baileys 断线后的最小重连等待时间，默认 `5000` 毫秒。
 - `BAILEYS_RECONNECT_MAX_DELAY_MS`: Baileys 断线后的最大重连等待时间，默认 `120000` 毫秒。
+- `BAILEYS_PROXY_DIAGNOSTICS`: 启动时是否测试 `CLIENT_PROXY_URL` 访问 WhatsApp HTTPS/WSS，默认 `true`。
 
 断线期间客户发来的消息不会实时进入 Hub。agent 重新上线后，会通过 WhatsApp Web 主动读取最近聊天记录并上报 Hub；agent ready 后也会按 `HISTORY_SYNC_INTERVAL_MS` 定时做轻量补偿同步。Hub 会按 WhatsApp 消息 `external_id` 去重，所以重复补拉不会重复入库。这个机制能覆盖大多数短暂断线场景，也能补到手机端或其他 WhatsApp Web 已经发出的最近消息；但是否能补回所有历史，仍取决于 WhatsApp Web 当时能同步到多少历史消息，以及 `HISTORY_SYNC_CHAT_LIMIT` / `HISTORY_SYNC_MESSAGE_LIMIT` 设置得是否足够大。
 
@@ -1167,6 +1169,20 @@ WebSocket Error (connect ECONNREFUSED 103.246.246.144:443)
 2. 如果已经配置代理，检查代理是否支持 WebSocket 和 HTTPS CONNECT。
 3. 如果同一台电脑跑多个 client，每个 client 使用不同代理端口，并确保每个代理都能访问 WhatsApp。
 4. 网络很慢但不是被拒绝时，可把 `BAILEYS_CONNECT_TIMEOUT_MS` 调大，例如 `120000`。
+
+新版 agent 启动时会输出代理诊断，例如：
+
+```text
+proxy diagnostics: testing WhatsApp reachability through socks5://127.0.0.1:7898
+proxy diagnostics: HTTPS https://web.whatsapp.com/ -> 200
+proxy diagnostics: WSS wss://web.whatsapp.com/ws/chat connected
+```
+
+如果 HTTPS 或 WSS 失败，说明当前代理不能用于 Baileys 连接 WhatsApp。很多代理软件的端口分为 HTTP mixed port 和 SOCKS port，如果 `socks5://127.0.0.1:7898` 不通，可以确认该端口是否真的是 SOCKS5；如果它是 mixed/http 端口，请改成：
+
+```bash
+CLIENT_PROXY_URL=http://127.0.0.1:7898
+```
 
 ### Windows 持续运行
 

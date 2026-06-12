@@ -9,6 +9,7 @@ import makeWASocket, {
 import dotenv from "dotenv";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 import Pino from "pino";
@@ -16,10 +17,11 @@ import { ProxyAgent } from "proxy-agent";
 import QRCode from "qrcode";
 import qrcodeTerminal from "qrcode-terminal";
 import { io } from "socket.io-client";
+import WebSocket from "ws";
 
 dotenv.config();
 
-const AGENT_VERSION = "baileys-2026-06-12.2";
+const AGENT_VERSION = "baileys-2026-06-12.3";
 
 const config = {
   hubUrl: process.env.HUB_URL || "http://localhost:3000",
@@ -42,7 +44,8 @@ const config = {
   connectTimeoutMs: numberFromEnv("BAILEYS_CONNECT_TIMEOUT_MS", 60_000),
   keepAliveIntervalMs: numberFromEnv("BAILEYS_KEEP_ALIVE_INTERVAL_MS", 30_000),
   reconnectMinDelayMs: numberFromEnv("BAILEYS_RECONNECT_MIN_DELAY_MS", 5_000),
-  reconnectMaxDelayMs: numberFromEnv("BAILEYS_RECONNECT_MAX_DELAY_MS", 120_000)
+  reconnectMaxDelayMs: numberFromEnv("BAILEYS_RECONNECT_MAX_DELAY_MS", 120_000),
+  proxyDiagnostics: process.env.BAILEYS_PROXY_DIAGNOSTICS !== "false"
 };
 
 const logger = Pino({ level: process.env.BAILEYS_LOG_LEVEL || "silent" });
@@ -140,6 +143,12 @@ socket.on("media:download", async (payload = {}, ack) => {
     ack?.({ ok: false, error: error.message });
   }
 });
+
+if (config.proxyDiagnostics) {
+  await runProxyDiagnostics().catch((error) => {
+    console.warn(`proxy diagnostics failed: ${error.message}`);
+  });
+}
 
 await connectBaileys();
 
@@ -488,6 +497,64 @@ function scheduleReconnect(reason) {
     });
   }, delayMs);
   reconnectTimer.unref?.();
+}
+
+async function runProxyDiagnostics() {
+  const targetDescription = proxyUrl ? `through ${maskProxyUrl(proxyUrl)}` : "without proxy";
+  console.log(`proxy diagnostics: testing WhatsApp reachability ${targetDescription}`);
+  await testHttpsReachability("https://web.whatsapp.com/");
+  await testWebSocketReachability("wss://web.whatsapp.com/ws/chat");
+}
+
+function testHttpsReachability(url) {
+  return new Promise((resolve) => {
+    const request = https.get(url, {
+      agent: proxyAgent || undefined,
+      timeout: 15_000,
+      headers: {
+        "user-agent": "Mozilla/5.0 WhatsAppActorHubAgent"
+      }
+    }, (response) => {
+      response.resume();
+      console.log(`proxy diagnostics: HTTPS ${url} -> ${response.statusCode}`);
+      resolve();
+    });
+    request.on("timeout", () => {
+      request.destroy(new Error("HTTPS test timed out"));
+    });
+    request.on("error", (error) => {
+      console.warn(`proxy diagnostics: HTTPS ${url} failed: ${error.message}`);
+      resolve();
+    });
+  });
+}
+
+function testWebSocketReachability(url) {
+  return new Promise((resolve) => {
+    const ws = new WebSocket(url, {
+      agent: proxyAgent || undefined,
+      handshakeTimeout: 15_000,
+      headers: {
+        origin: "https://web.whatsapp.com",
+        "user-agent": "Mozilla/5.0 WhatsAppActorHubAgent"
+      }
+    });
+    const finish = (message) => {
+      console.log(message);
+      try {
+        ws.close();
+      } catch {
+        // ignore diagnostic close errors
+      }
+      resolve();
+    };
+    ws.once("open", () => finish(`proxy diagnostics: WSS ${url} connected`));
+    ws.once("unexpected-response", (_request, response) => finish(`proxy diagnostics: WSS ${url} unexpected response ${response.statusCode}`));
+    ws.once("error", (error) => {
+      console.warn(`proxy diagnostics: WSS ${url} failed: ${error.message}`);
+      resolve();
+    });
+  });
 }
 
 async function closeCurrentBaileysSocket(reason) {

@@ -808,7 +808,7 @@ function editableClientConfig(clientConfig) {
 function agentPackageJson() {
   return {
     name: "whatsapp-hub-client-agent",
-    version: "0.2.0-baileys.2",
+    version: "0.2.0-baileys.3",
     private: true,
     type: "module",
     scripts: {
@@ -860,7 +860,8 @@ function buildClientDeployment(clientConfig, token, fallbackHubUrl = config.publ
     ["BAILEYS_CONNECT_TIMEOUT_MS", "60000"],
     ["BAILEYS_KEEP_ALIVE_INTERVAL_MS", "30000"],
     ["BAILEYS_RECONNECT_MIN_DELAY_MS", "5000"],
-    ["BAILEYS_RECONNECT_MAX_DELAY_MS", "120000"]
+    ["BAILEYS_RECONNECT_MAX_DELAY_MS", "120000"],
+    ["BAILEYS_PROXY_DIAGNOSTICS", "true"]
   ].map(([key, value]) => `${key}=${quoteEnv(value)}`).join("\n");
 
   const agentBaseUrl = new URL("/agent/", resolved.hubUrl).toString();
