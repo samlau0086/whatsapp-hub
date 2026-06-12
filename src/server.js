@@ -808,7 +808,7 @@ function editableClientConfig(clientConfig) {
 function agentPackageJson() {
   return {
     name: "whatsapp-hub-client-agent",
-    version: "0.2.0-baileys.4",
+    version: "0.2.0-baileys.5",
     private: true,
     type: "module",
     scripts: {
@@ -817,10 +817,11 @@ function agentPackageJson() {
     dependencies: {
       "@whiskeysockets/baileys": "^6.7.18",
       dotenv: "^16.4.7",
+      "https-proxy-agent": "^7.0.6",
       pino: "^9.5.0",
-      "proxy-agent": "^6.5.0",
       qrcode: "^1.5.4",
       "qrcode-terminal": "^0.12.0",
+      "socks-proxy-agent": "^8.0.5",
       "socket.io-client": "^4.8.1",
       ws: "^8.18.0"
     }

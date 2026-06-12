@@ -1217,6 +1217,8 @@ curl.exe -v -x socks5h://127.0.0.1:7898 https://web.whatsapp.com/ --connect-time
 
 哪个命令能返回 HTTP 响应，`CLIENT_PROXY_URL` 就使用哪个协议。两个都超时则说明该代理端口或代理节点不能访问 WhatsApp。
 
+`baileys-2026-06-12.5` 之后，agent 会按协议显式选择代理实现：`socks5h://` 使用 `socks-proxy-agent`，`http://` 使用 `https-proxy-agent`。如果 `curl.exe -x socks5h://... https://web.whatsapp.com/` 能成功，agent 也应该使用同样的 `CLIENT_PROXY_URL=socks5h://...`。
+
 ### Windows 持续运行
 
 开发测试可以直接保持 PowerShell 窗口运行：

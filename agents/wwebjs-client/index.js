@@ -13,16 +13,17 @@ import https from "node:https";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { HttpsProxyAgent } from "https-proxy-agent";
 import Pino from "pino";
-import { ProxyAgent } from "proxy-agent";
 import QRCode from "qrcode";
 import qrcodeTerminal from "qrcode-terminal";
+import { SocksProxyAgent } from "socks-proxy-agent";
 import { io } from "socket.io-client";
 import WebSocket from "ws";
 
 dotenv.config();
 
-const AGENT_VERSION = "baileys-2026-06-12.4";
+const AGENT_VERSION = "baileys-2026-06-12.5";
 
 const config = {
   hubUrl: process.env.HUB_URL || "http://localhost:3000",
@@ -51,7 +52,7 @@ const config = {
 
 const logger = Pino({ level: process.env.BAILEYS_LOG_LEVEL || "silent" });
 const proxyUrl = buildProxyUrl(config.proxyUrl, config.proxyUsername, config.proxyPassword);
-const proxyAgent = proxyUrl ? new ProxyAgent(proxyUrl) : null;
+const proxyAgent = createProxyAgent(proxyUrl);
 const socket = io(config.hubUrl, {
   auth: { token: config.token },
   reconnection: true,
@@ -681,6 +682,18 @@ function buildProxyUrl(proxyUrl, username, password) {
   } catch {
     return proxyUrl;
   }
+}
+
+function createProxyAgent(value) {
+  if (!value) return null;
+  const protocol = new URL(value).protocol;
+  if (["socks:", "socks4:", "socks4a:", "socks5:", "socks5h:"].includes(protocol)) {
+    return new SocksProxyAgent(value);
+  }
+  if (["http:", "https:"].includes(protocol)) {
+    return new HttpsProxyAgent(value);
+  }
+  throw new Error(`unsupported CLIENT_PROXY_URL protocol: ${protocol}`);
 }
 
 function maskProxyUrl(value) {
