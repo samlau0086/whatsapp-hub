@@ -643,6 +643,24 @@ If the client is online for a short time and then becomes offline while the agen
 
 如果 `npm install` 失败，可以删除生成的 agent 文件夹后重新运行 install BAT。
 
+#### Windows 杀毒软件误报安装脚本
+
+生成的 `xxx-install.bat` 会下载 `package.json`、`baileys-client.js`，写入 `.env`，然后执行 `npm install`。这类“下载脚本并安装依赖”的行为容易被部分杀毒软件误判。
+
+新版安装脚本已经尽量降低误报特征：
+
+- 不再使用 `PowerShell -ExecutionPolicy Bypass`。
+- 不再使用 PowerShell `-EncodedCommand`。
+- 下载文件优先使用 Windows 自带 `curl.exe`。
+- `.env` 由本机 Node.js 写入，不再用编码后的 PowerShell 命令写入。
+
+如果仍被拦截，可以先右键编辑 BAT 查看内容，确认下载地址是你自己的 Hub 域名，例如 `https://你的域名/agent/baileys-client.js`。确认无误后，把该 agent 文件夹加入杀毒软件信任目录，或改为手动下载 `.env`、`package.json`、`baileys-client.js` 后运行：
+
+```powershell
+npm install --omit=dev
+npm start
+```
+
 #### 6. 二维码在哪里
 
 agent 文件夹里会生成：

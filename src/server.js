@@ -987,13 +987,13 @@ function buildWindowsAgentScript({ clientId, agentBaseUrl, env }) {
     "cd /d \"%AGENT_DIR%\"",
     "",
     "echo Downloading WhatsApp agent files...",
-    `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest '${new URL("package.json", agentBaseUrl).toString()}' -OutFile 'package.json'"`,
+    `call :DownloadFile "${windowsBatchValue(new URL("package.json", agentBaseUrl).toString())}" "package.json"`,
     "if errorlevel 1 goto :DownloadFailed",
-    `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest '${new URL("baileys-client.js", agentBaseUrl).toString()}' -OutFile 'baileys-client.js'"`,
+    `call :DownloadFile "${windowsBatchValue(new URL("baileys-client.js", agentBaseUrl).toString())}" "baileys-client.js"`,
     "if errorlevel 1 goto :DownloadFailed",
     "",
     "echo Writing .env...",
-    `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${powershellEncodedWriteEnv(env)}`,
+    `node -e "require('fs').writeFileSync('.env', Buffer.from('${base64Utf8(env)}','base64').toString('utf8'))"`,
     "if errorlevel 1 goto :Failed",
     "",
     "echo Creating one-click startup script...",
@@ -1049,6 +1049,17 @@ function buildWindowsAgentScript({ clientId, agentBaseUrl, env }) {
     "set \"PATH=%MACHINE_PATH%;%USER_PATH%;%PATH%\"",
     "exit /b 0",
     "",
+    ":DownloadFile",
+    "set \"DOWNLOAD_URL=%~1\"",
+    "set \"DOWNLOAD_OUT=%~2\"",
+    "where curl.exe >nul 2>nul",
+    "if not errorlevel 1 (",
+    "  curl.exe -fL \"%DOWNLOAD_URL%\" -o \"%DOWNLOAD_OUT%\"",
+    "  exit /b %ERRORLEVEL%",
+    ")",
+    "powershell -NoProfile -Command \"Invoke-WebRequest -UseBasicParsing -Uri '%DOWNLOAD_URL%' -OutFile '%DOWNLOAD_OUT%'\"",
+    "exit /b %ERRORLEVEL%",
+    "",
     ":WriteStartBat",
     "(",
     "  echo @echo off",
@@ -1103,14 +1114,8 @@ function windowsBatchValue(value) {
   return String(value).replace(/[%"]/g, "-");
 }
 
-function powershellEncodedWriteEnv(env) {
-  const script = [
-    "$envText = @'",
-    env,
-    "'@",
-    "Set-Content -Encoding utf8 '.env' $envText"
-  ].join("\n");
-  return Buffer.from(script, "utf16le").toString("base64");
+function base64Utf8(value) {
+  return Buffer.from(String(value || ""), "utf8").toString("base64");
 }
 
 function createAndDispatchMessageTask(req, res) {
