@@ -36,7 +36,11 @@ const config = {
   historySyncIntervalMs: numberFromEnv("HISTORY_SYNC_INTERVAL_MS", 300_000),
   inboundVideoMode: process.env.INBOUND_VIDEO_MODE || "lazy",
   printQrInTerminal: process.env.PRINT_QR_IN_TERMINAL !== "false",
-  syncFullHistory: process.env.BAILEYS_SYNC_FULL_HISTORY === "true"
+  syncFullHistory: process.env.BAILEYS_SYNC_FULL_HISTORY === "true",
+  connectTimeoutMs: numberFromEnv("BAILEYS_CONNECT_TIMEOUT_MS", 60_000),
+  keepAliveIntervalMs: numberFromEnv("BAILEYS_KEEP_ALIVE_INTERVAL_MS", 30_000),
+  reconnectMinDelayMs: numberFromEnv("BAILEYS_RECONNECT_MIN_DELAY_MS", 5_000),
+  reconnectMaxDelayMs: numberFromEnv("BAILEYS_RECONNECT_MAX_DELAY_MS", 120_000)
 };
 
 const logger = Pino({ level: process.env.BAILEYS_LOG_LEVEL || "silent" });
@@ -51,6 +55,7 @@ const socket = io(config.hubUrl, {
 let sock = null;
 let whatsappReady = false;
 let reconnectTimer = null;
+let reconnectAttempts = 0;
 let historySyncTimer = null;
 let historySyncInProgress = false;
 const recentMessages = new Map();
@@ -63,6 +68,7 @@ console.log(`whatsapp proxy: ${proxyUrl ? maskProxyUrl(proxyUrl) : "disabled"}`)
 console.log(`qr image output: ${config.qrOutputDir}`);
 console.log(`history sync: ${config.historySyncOnReady ? `${config.historySyncChatLimit} chats x ${config.historySyncMessageLimit} messages` : "disabled"}`);
 console.log(`history sync interval: ${config.historySyncOnReady ? `${config.historySyncIntervalMs} ms` : "disabled"}`);
+console.log(`baileys connect timeout: ${config.connectTimeoutMs} ms`);
 
 socket.on("connect", () => {
   emitHello(whatsappReady ? "online" : "offline");
@@ -134,6 +140,7 @@ socket.on("media:download", async (payload = {}, ack) => {
 await connectBaileys();
 
 async function connectBaileys() {
+  await closeCurrentBaileysSocket("starting new Baileys socket");
   const { state, saveCreds } = await useMultiFileAuthState(config.authDataPath);
   const { version } = await fetchLatestBaileysVersion();
   sock = makeWASocket({
@@ -142,7 +149,10 @@ async function connectBaileys() {
       keys: makeCacheableSignalKeyStore(state.keys, logger)
     },
     browser: ["WhatsApp Actor Hub", "Chrome", "1.0.0"],
+    connectTimeoutMs: config.connectTimeoutMs,
+    defaultQueryTimeoutMs: config.connectTimeoutMs,
     emitOwnEvents: true,
+    keepAliveIntervalMs: config.keepAliveIntervalMs,
     logger,
     markOnlineOnConnect: true,
     printQRInTerminal: false,
@@ -181,6 +191,7 @@ async function handleConnectionUpdate(update = {}) {
   if (qr) await saveQr(qr);
   if (connection === "open") {
     whatsappReady = true;
+    reconnectAttempts = 0;
     emitHello("online");
     console.log(`${config.clientId} is ready (Baileys)`);
     startPeriodicHistorySync();
@@ -190,13 +201,18 @@ async function handleConnectionUpdate(update = {}) {
     whatsappReady = false;
     stopPeriodicHistorySync();
     const statusCode = lastDisconnect?.error?.output?.statusCode;
+    const errorMessage = lastDisconnect?.error?.message || "connection closed";
     const loggedOut = statusCode === DisconnectReason.loggedOut;
-    emitHeartbeat("offline", lastDisconnect?.error?.message || "connection closed");
+    emitHeartbeat("offline", errorMessage);
+    console.warn(`Baileys connection closed: ${errorMessage}${statusCode ? ` (${statusCode})` : ""}`);
+    if (isWhatsAppNetworkRefusedError(lastDisconnect?.error) && !proxyUrl) {
+      console.warn("WhatsApp WebSocket connection was refused or timed out without CLIENT_PROXY_URL. Configure CLIENT_PROXY_URL, or verify this network can reach WhatsApp Web directly.");
+    }
     if (loggedOut) {
       console.error("WhatsApp logged out. Delete auth directory if needed, then scan QR again.");
       return;
     }
-    scheduleReconnect(lastDisconnect?.error?.message || `connection closed (${statusCode || "unknown"})`);
+    scheduleReconnect(errorMessage || `connection closed (${statusCode || "unknown"})`);
   }
 }
 
@@ -454,15 +470,36 @@ async function syncRecentMessages(reason = "manual") {
 
 function scheduleReconnect(reason) {
   if (reconnectTimer) return;
-  console.warn(`scheduling Baileys reconnect: ${reason}`);
+  reconnectAttempts += 1;
+  const delayMs = Math.min(
+    config.reconnectMaxDelayMs,
+    config.reconnectMinDelayMs * 2 ** Math.min(reconnectAttempts - 1, 6)
+  );
+  console.warn(`scheduling Baileys reconnect in ${delayMs}ms: ${reason}`);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connectBaileys().catch((error) => {
       console.error(`failed to reconnect Baileys: ${error.message}`);
       scheduleReconnect(error.message);
     });
-  }, 3_000);
+  }, delayMs);
   reconnectTimer.unref?.();
+}
+
+async function closeCurrentBaileysSocket(reason) {
+  if (!sock) return;
+  const current = sock;
+  sock = null;
+  try {
+    current.ev?.removeAllListeners?.();
+  } catch {
+    // ignore cleanup errors from partially initialized sockets
+  }
+  try {
+    await current.end?.(new Error(reason));
+  } catch {
+    // ignore cleanup errors from already closed sockets
+  }
 }
 
 async function saveQr(qr) {
@@ -602,6 +639,10 @@ function safeFileName(value) {
 
 function isRecoverableBaileysError(error) {
   return /connection|closed|timed out|socket|stream|restart|required/i.test(error?.message || "");
+}
+
+function isWhatsAppNetworkRefusedError(error) {
+  return /Opening handshake has timed out|ECONNREFUSED|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH/i.test(error?.message || "");
 }
 
 process.on("SIGINT", async () => {

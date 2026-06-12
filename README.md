@@ -616,6 +616,7 @@ If the client is online for a short time and then becomes offline while the agen
 - Update the Hub to the latest version. The Hub now keeps a client online when the Socket.IO connection is still alive, even if a heartbeat is delayed by history sync or media download.
 - Check the Hub env value `CLIENT_OFFLINE_AFTER_MS`. The default is `45000` ms. On slow VPS/network environments, set it to `120000`.
 - Check the agent log for repeated `connect_error`, `disconnect`, proxy errors, or Baileys connection close messages.
+- If the log contains `Opening handshake has timed out` or `ECONNREFUSED <ip>:443`, the client computer cannot reliably reach WhatsApp WebSocket servers. Configure `CLIENT_PROXY_URL`, or change the network出口 used by this client.
 - When using Nginx/Caddy, make sure WebSocket upgrade headers are configured, otherwise Socket.IO may reconnect repeatedly.
 
 #### 4. 每次启动都要重新扫码
@@ -1048,6 +1049,10 @@ HISTORY_SYNC_ON_READY=true
 HISTORY_SYNC_CHAT_LIMIT=50
 HISTORY_SYNC_MESSAGE_LIMIT=30
 HISTORY_SYNC_INTERVAL_MS=300000
+BAILEYS_CONNECT_TIMEOUT_MS=60000
+BAILEYS_KEEP_ALIVE_INTERVAL_MS=30000
+BAILEYS_RECONNECT_MIN_DELAY_MS=5000
+BAILEYS_RECONNECT_MAX_DELAY_MS=120000
 ```
 
 字段说明：
@@ -1065,6 +1070,10 @@ HISTORY_SYNC_INTERVAL_MS=300000
 - `HISTORY_SYNC_CHAT_LIMIT`: 每次上线补拉最近多少个会话，默认 `50`。
 - `HISTORY_SYNC_MESSAGE_LIMIT`: 每个会话补拉最近多少条消息，默认 `30`。
 - `HISTORY_SYNC_INTERVAL_MS`: agent ready 后定时补偿同步间隔，默认 `300000` 毫秒，也就是 5 分钟。设得越小越实时，但越容易增加电脑和 Hub 压力。
+- `BAILEYS_CONNECT_TIMEOUT_MS`: Baileys 连接 WhatsApp WebSocket 的超时时间，默认 `60000` 毫秒。网络慢时可调大。
+- `BAILEYS_KEEP_ALIVE_INTERVAL_MS`: Baileys WebSocket keepalive 间隔，默认 `30000` 毫秒。
+- `BAILEYS_RECONNECT_MIN_DELAY_MS`: Baileys 断线后的最小重连等待时间，默认 `5000` 毫秒。
+- `BAILEYS_RECONNECT_MAX_DELAY_MS`: Baileys 断线后的最大重连等待时间，默认 `120000` 毫秒。
 
 断线期间客户发来的消息不会实时进入 Hub。agent 重新上线后，会通过 WhatsApp Web 主动读取最近聊天记录并上报 Hub；agent ready 后也会按 `HISTORY_SYNC_INTERVAL_MS` 定时做轻量补偿同步。Hub 会按 WhatsApp 消息 `external_id` 去重，所以重复补拉不会重复入库。这个机制能覆盖大多数短暂断线场景，也能补到手机端或其他 WhatsApp Web 已经发出的最近消息；但是否能补回所有历史，仍取决于 WhatsApp Web 当时能同步到多少历史消息，以及 `HISTORY_SYNC_CHAT_LIMIT` / `HISTORY_SYNC_MESSAGE_LIMIT` 设置得是否足够大。
 
@@ -1139,6 +1148,20 @@ CLIENT_PROXY_PASSWORD=my-password
 ```
 
 代理由 Baileys 的 WhatsApp 连接使用；Hub 的 Socket.IO 连接仍按系统网络直接连接 VPS。
+
+如果日志里出现：
+
+```text
+WebSocket Error (Opening handshake has timed out)
+WebSocket Error (connect ECONNREFUSED 103.246.246.144:443)
+```
+
+说明 agent 到 Hub 是通的，但这台电脑到 WhatsApp WebSocket 服务器不通或被拒绝。优先处理：
+
+1. 给该 client 配置可访问 WhatsApp 的 `CLIENT_PROXY_URL`。
+2. 如果已经配置代理，检查代理是否支持 WebSocket 和 HTTPS CONNECT。
+3. 如果同一台电脑跑多个 client，每个 client 使用不同代理端口，并确保每个代理都能访问 WhatsApp。
+4. 网络很慢但不是被拒绝时，可把 `BAILEYS_CONNECT_TIMEOUT_MS` 调大，例如 `120000`。
 
 ### Windows 持续运行
 
@@ -1914,6 +1937,10 @@ Agent:
 - `HISTORY_SYNC_CHAT_LIMIT`: 每次补偿同步扫描最近多少个会话。
 - `HISTORY_SYNC_MESSAGE_LIMIT`: 每个会话补偿同步最近多少条消息。
 - `HISTORY_SYNC_INTERVAL_MS`: agent 在线期间的周期补偿同步间隔，默认 5 分钟。需要更及时同步手机端/其他 WhatsApp Web 发出的消息时可适当调小，例如 `120000`；消息很多时建议调大。
+- `BAILEYS_CONNECT_TIMEOUT_MS`: Baileys 连接 WhatsApp WebSocket 的超时时间。
+- `BAILEYS_KEEP_ALIVE_INTERVAL_MS`: Baileys WebSocket keepalive 间隔。
+- `BAILEYS_RECONNECT_MIN_DELAY_MS`: Baileys 断线后指数退避的最小等待时间。
+- `BAILEYS_RECONNECT_MAX_DELAY_MS`: Baileys 断线后指数退避的最大等待时间。
 
 ## Web 后台新增 Client 部署
 
