@@ -265,6 +265,10 @@ function chatConversationKey(chat) {
   return String(chat?.conversation_key || chat?.contact_phone || chat?.conversation_id || chat?.chat_id || "");
 }
 
+function stripChatIdClient(value) {
+  return String(value || "").split("@")[0].replace(/\D/g, "");
+}
+
 function messageMatchesActiveChat(message, chat = selectedChat()) {
   if (!state.selectedClientId || (!state.selectedChatId && !state.selectedConversationKey) || message.client_id !== state.selectedClientId) return false;
   const keys = new Set([
@@ -278,10 +282,13 @@ function messageMatchesActiveChat(message, chat = selectedChat()) {
     || keys.has(String(message.conversation_id || ""))) {
     return true;
   }
-  if (keys.size && selectedChatPhone(chat)) return false;
   if (message.chat_id === state.selectedChatId) return true;
   if (message.raw_chat_id === state.selectedChatId) return true;
   if (chat?.chat_id && (message.chat_id === chat.chat_id || message.raw_chat_id === chat.chat_id)) return true;
+  const chatIds = [chat?.chat_id, state.selectedChatId].filter(Boolean).map(stripChatIdClient).filter(Boolean);
+  const messageChatIds = [message.chat_id, message.raw_chat_id].filter(Boolean).map(stripChatIdClient).filter(Boolean);
+  if (chatIds.some((value) => messageChatIds.includes(value))) return true;
+  if (keys.size && selectedChatPhone(chat)) return false;
   return false;
 }
 
@@ -340,7 +347,17 @@ function prunePinnedTasks() {
 }
 
 function sortMessagesOldestFirst(messages) {
-  return [...messages].sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+  return [...messages].sort((a, b) => {
+    const diff = messageTimeValue(a) - messageTimeValue(b);
+    if (diff) return diff;
+    if (a.payload?.pending && !b.payload?.pending) return 1;
+    if (!a.payload?.pending && b.payload?.pending) return -1;
+    return String(a.id || "").localeCompare(String(b.id || ""));
+  });
+}
+
+function messageTimeValue(message) {
+  return Date.parse(message?.created_at || "") || Date.parse(message?.received_at || "") || 0;
 }
 
 function sortChatsNewestFirst(chats) {
@@ -985,8 +1002,9 @@ function connectSocket() {
   });
   state.socket.on("message:created", (message) => {
     if (!can("messages:read")) return;
-    state.messages = dedupeMessages([message, ...state.messages.filter((item) => item.id !== message.id && item.payload?.taskId !== message.payload?.taskId)]).slice(0, 300);
-    if (message.client_id === state.selectedClientId) scheduleChatRefresh();
+    const wasActiveChat = messageMatchesActiveChat(message, selectedChat());
+    state.messages = mergeMessages([message], 500);
+    if (message.client_id === state.selectedClientId) scheduleChatRefresh({ loadMessages: wasActiveChat });
     render();
   });
   state.socket.on("contact:mapping-updated", (mapping) => {
@@ -1015,12 +1033,16 @@ async function refreshChats(clientId = state.selectedClientId) {
   syncSelectedChat();
 }
 
-function scheduleChatRefresh() {
+function scheduleChatRefresh({ loadMessages = false } = {}) {
   if (state.chatLoading || !state.selectedClientId) return;
   if (state.chatRefreshTimer) window.clearTimeout(state.chatRefreshTimer);
   state.chatRefreshTimer = window.setTimeout(() => {
     state.chatRefreshTimer = null;
     refreshChats()
+      .then(() => {
+        if (loadMessages && (state.selectedChatId || state.selectedConversationKey)) return loadActiveChatMessages();
+        return null;
+      })
       .then(render)
       .catch(() => {});
   }, 1200);
@@ -1034,10 +1056,7 @@ async function loadActiveChatMessages() {
     ? `targetPhone=${encodeURIComponent(phone)}`
     : `chatId=${encodeURIComponent(chat?.chat_id || state.selectedChatId)}`;
   const messages = await api(`/admin/api/messages?clientId=${encodeURIComponent(state.selectedClientId)}&${query}&limit=100`);
-  state.messages = dedupeMessages([
-    ...dedupeMessages(messages.messages),
-    ...state.messages.filter((message) => !messageMatchesActiveChat(message, chat))
-  ]).slice(0, 200);
+  state.messages = mergeMessages(messages.messages, 500);
 }
 
 function syncSelectedChat() {
@@ -1487,7 +1506,7 @@ function bindEvents() {
       })
       .then(({ task }) => {
         rememberTask(task);
-        state.messages = [optimisticChatMessage({ task, body, media, phone }), ...state.messages].slice(0, 200);
+        state.messages = mergeMessages([optimisticChatMessage({ task, body, media, phone })], 500);
         $("chat-send-body").value = "";
         $("chat-file").value = "";
         showToast(t("taskDispatched"));
