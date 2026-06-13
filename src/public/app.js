@@ -15,6 +15,7 @@ const state = {
   clientConfigs: [],
   clientDeployment: null,
   deploymentTab: "env",
+  activeWorkspaceTab: localStorage.getItem("hubWorkspaceTab") || "send",
   editingClientConfigId: "",
   socket: null,
   refreshTimer: null,
@@ -54,6 +55,7 @@ const i18n = {
     taskTimeline: "Task Timeline",
     messageStream: "Message Stream",
     apiRequests: "API Requests",
+    apiTokens: "API Tokens",
     centralChat: "Central Chat",
     clearChats: "Clear",
     deleteChat: "Delete chat",
@@ -121,6 +123,7 @@ const i18n = {
     taskTimeline: "任务时间线",
     messageStream: "消息流",
     apiRequests: "API 请求记录",
+    apiTokens: "API 令牌",
     centralChat: "集中聊天",
     clearChats: "清除",
     deleteChat: "删除会话",
@@ -223,6 +226,48 @@ function relativeTime(value) {
 
 function can(permission) {
   return state.user?.permissions?.includes(permission);
+}
+
+function workspaceTabs() {
+  return [
+    { id: "send", visible: can("tasks:send") },
+    { id: "tasks", visible: can("tasks:read") },
+    { id: "messages", visible: can("messages:read") },
+    { id: "requests", visible: can("requests:read") },
+    { id: "users", visible: can("users:manage") },
+    { id: "tokens", visible: can("api_tokens:manage") }
+  ];
+}
+
+function visibleWorkspaceTabs() {
+  return workspaceTabs().filter((tab) => tab.visible);
+}
+
+function ensureActiveWorkspaceTab() {
+  const visibleTabs = visibleWorkspaceTabs();
+  if (visibleTabs.some((tab) => tab.id === state.activeWorkspaceTab)) return;
+  state.activeWorkspaceTab = visibleTabs[0]?.id || "send";
+}
+
+function renderWorkspaceTabs() {
+  ensureActiveWorkspaceTab();
+  const visibility = new Map(workspaceTabs().map((tab) => [tab.id, tab.visible]));
+  document.querySelectorAll("[data-workspace-tab]").forEach((button) => {
+    const id = button.dataset.workspaceTab;
+    const visible = visibility.get(id) !== false;
+    const active = id === state.activeWorkspaceTab;
+    button.hidden = !visible;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+    button.tabIndex = active ? 0 : -1;
+  });
+  document.querySelectorAll("[data-workspace-pane]").forEach((pane) => {
+    const id = pane.dataset.workspacePane;
+    const visible = visibility.get(id) !== false;
+    const active = id === state.activeWorkspaceTab && visible;
+    pane.hidden = !active;
+    pane.classList.toggle("active", active);
+  });
 }
 
 function selectedClient() {
@@ -533,6 +578,7 @@ function render() {
   const createClientButton = $("toggle-client-create");
   if (createClientButton) createClientButton.hidden = !can("clients:delete");
   renderDeploymentGuide();
+  renderWorkspaceTabs();
 
   $("clients").innerHTML = visibleClients.length ? visibleClients.map((client) => `
     <article class="client-card ${client.id === state.selectedClientId ? "selected" : ""}" data-client-id="${escapeHtml(client.id)}">
@@ -1340,6 +1386,14 @@ function bindEvents() {
     button.dataset.filter = button.id.replace("filter-", "");
     button.addEventListener("click", () => {
       state.clientFilter = button.dataset.filter;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-workspace-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeWorkspaceTab = button.dataset.workspaceTab;
+      localStorage.setItem("hubWorkspaceTab", state.activeWorkspaceTab);
       render();
     });
   });

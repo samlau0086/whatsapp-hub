@@ -112,102 +112,125 @@
             </div>
           </section>
 
-          <div class="compose-panel">
-            <div class="section-head">
-              <div>
-                <h2 data-i18n="sendMessage">Send Message</h2>
-                <p id="dispatch-hint">Random online client</p>
-              </div>
-              <span id="selected-client-pill" class="soft-pill">No client selected</span>
+          <section class="workspace-tabs">
+            <div class="workspace-tabbar" role="tablist" aria-label="Workspace tools">
+              <button class="workspace-tab active" type="button" data-workspace-tab="send" role="tab" data-i18n="sendMessage">Send Message</button>
+              <button class="workspace-tab" type="button" data-workspace-tab="tasks" role="tab" data-i18n="taskTimeline">Task Timeline</button>
+              <button class="workspace-tab" type="button" data-workspace-tab="messages" role="tab" data-i18n="messageStream">Message Stream</button>
+              <button class="workspace-tab" type="button" data-workspace-tab="requests" role="tab" data-i18n="apiRequests">API Requests</button>
+              <button class="workspace-tab" type="button" data-workspace-tab="users" role="tab" data-i18n="userManagement">User Management</button>
+              <button class="workspace-tab" type="button" data-workspace-tab="tokens" role="tab" data-i18n="apiTokens">API Tokens</button>
             </div>
 
-            <form id="send-form" class="send-form">
-              <label>
-                <span data-i18n="client">Client</span>
-                <select id="send-client">
-                  <option value="">Random online client</option>
-                </select>
-              </label>
-              <label>
-                <span data-i18n="phone">Phone</span>
-                <input id="send-to" placeholder="15551234567" />
-              </label>
-              <label class="message-input">
-                <span data-i18n="message">Message</span>
-                <textarea id="send-body" placeholder="Type message body"></textarea>
-              </label>
-              <button type="submit" data-i18n="dispatchTask">Dispatch task</button>
-            </form>
-          </div>
+            <div class="workspace-tabcontent">
+              <div class="workspace-pane active" data-workspace-pane="send" role="tabpanel">
+                <div class="compose-panel">
+                  <div class="section-head">
+                    <div>
+                      <h2 data-i18n="sendMessage">Send Message</h2>
+                      <p id="dispatch-hint">Random online client</p>
+                    </div>
+                    <span id="selected-client-pill" class="soft-pill">No client selected</span>
+                  </div>
 
-          <div class="content-grid">
-            <section class="panel-card">
-              <div class="section-head">
-                <div>
-                  <h2 data-i18n="taskTimeline">Task Timeline</h2>
-                  <p id="task-summary">Latest 50 tasks</p>
+                  <form id="send-form" class="send-form">
+                    <label>
+                      <span data-i18n="client">Client</span>
+                      <select id="send-client">
+                        <option value="">Random online client</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span data-i18n="phone">Phone</span>
+                      <input id="send-to" placeholder="15551234567" />
+                    </label>
+                    <label class="message-input">
+                      <span data-i18n="message">Message</span>
+                      <textarea id="send-body" placeholder="Type message body"></textarea>
+                    </label>
+                    <button type="submit" data-i18n="dispatchTask">Dispatch task</button>
+                  </form>
                 </div>
               </div>
-              <div id="tasks" class="timeline"></div>
-            </section>
 
-            <section class="panel-card">
-              <div class="section-head">
-                <div>
-                  <h2 data-i18n="messageStream">Message Stream</h2>
-                  <p id="message-summary">Latest 50 messages</p>
-                </div>
+              <div class="workspace-pane" data-workspace-pane="tasks" role="tabpanel" hidden>
+                <section class="panel-card">
+                  <div class="section-head">
+                    <div>
+                      <h2 data-i18n="taskTimeline">Task Timeline</h2>
+                      <p id="task-summary">Latest 50 tasks</p>
+                    </div>
+                  </div>
+                  <div id="tasks" class="timeline"></div>
+                </section>
               </div>
-              <div id="messages" class="message-stream"></div>
-            </section>
-          </div>
 
-          <section class="panel-card">
-            <div class="section-head">
-              <div>
-                <h2 data-i18n="apiRequests">API Requests</h2>
-                <p id="request-summary">Latest 50 API calls</p>
+              <div class="workspace-pane" data-workspace-pane="messages" role="tabpanel" hidden>
+                <section class="panel-card">
+                  <div class="section-head">
+                    <div>
+                      <h2 data-i18n="messageStream">Message Stream</h2>
+                      <p id="message-summary">Latest 50 messages</p>
+                    </div>
+                  </div>
+                  <div id="messages" class="message-stream"></div>
+                </section>
+              </div>
+
+              <div class="workspace-pane" data-workspace-pane="requests" role="tabpanel" hidden>
+                <section class="panel-card">
+                  <div class="section-head">
+                    <div>
+                      <h2 data-i18n="apiRequests">API Requests</h2>
+                      <p id="request-summary">Latest 50 API calls</p>
+                    </div>
+                  </div>
+                  <div id="requests" class="request-list"></div>
+                </section>
+              </div>
+
+              <div class="workspace-pane" data-workspace-pane="users" role="tabpanel" hidden>
+                <section id="users-panel" class="panel-card">
+                  <div class="section-head">
+                    <div>
+                      <h2 data-i18n="userManagement">User Management</h2>
+                      <p data-i18n="rolesAccess">Roles and access control</p>
+                    </div>
+                  </div>
+                  <form id="user-form" class="user-form">
+                    <input id="user-username" placeholder="Username" />
+                    <input id="user-display-name" placeholder="Display name" />
+                    <input id="user-password" type="password" placeholder="Password" />
+                    <select id="user-role">
+                      <option value="viewer">viewer</option>
+                      <option value="operator">operator</option>
+                      <option value="admin">admin</option>
+                      <option value="superadmin">superadmin</option>
+                    </select>
+                    <button type="submit" data-i18n="createUser">Create user</button>
+                  </form>
+                  <div id="users" class="user-list"></div>
+                </section>
+              </div>
+
+              <div class="workspace-pane" data-workspace-pane="tokens" role="tabpanel" hidden>
+                <section id="tokens-panel" class="panel-card">
+                  <div class="section-head">
+                    <div>
+                      <h2 data-i18n="apiTokens">API Tokens</h2>
+                      <p>Generate, edit permissions, and revoke tokens</p>
+                    </div>
+                  </div>
+                  <form id="token-create-form" class="token-create-form">
+                    <input id="token-name" placeholder="Token name" />
+                    <div id="token-create-permissions" class="permission-grid token-create-permissions"></div>
+                    <button type="submit">Generate token</button>
+                  </form>
+                  <div id="token-secret" class="token-secret" hidden></div>
+                  <div id="api-tokens" class="token-list"></div>
+                </section>
               </div>
             </div>
-            <div id="requests" class="request-list"></div>
-          </section>
-
-          <section id="users-panel" class="panel-card">
-            <div class="section-head">
-              <div>
-                <h2 data-i18n="userManagement">User Management</h2>
-                <p data-i18n="rolesAccess">Roles and access control</p>
-              </div>
-            </div>
-            <form id="user-form" class="user-form">
-              <input id="user-username" placeholder="Username" />
-              <input id="user-display-name" placeholder="Display name" />
-              <input id="user-password" type="password" placeholder="Password" />
-              <select id="user-role">
-                <option value="viewer">viewer</option>
-                <option value="operator">operator</option>
-                <option value="admin">admin</option>
-                <option value="superadmin">superadmin</option>
-              </select>
-              <button type="submit" data-i18n="createUser">Create user</button>
-            </form>
-            <div id="users" class="user-list"></div>
-          </section>
-
-          <section id="tokens-panel" class="panel-card">
-            <div class="section-head">
-              <div>
-                <h2>API Tokens</h2>
-                <p>Generate, edit permissions, and revoke tokens</p>
-              </div>
-            </div>
-            <form id="token-create-form" class="token-create-form">
-              <input id="token-name" placeholder="Token name" />
-              <div id="token-create-permissions" class="permission-grid token-create-permissions"></div>
-              <button type="submit">Generate token</button>
-            </form>
-            <div id="token-secret" class="token-secret" hidden></div>
-            <div id="api-tokens" class="token-list"></div>
           </section>
         </section>
       </section>
