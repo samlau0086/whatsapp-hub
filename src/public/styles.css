@@ -1414,6 +1414,7 @@ p {
 .workspace,
 .main-panel,
 .content-grid {
+  align-content: start;
   gap: 10px;
 }
 
@@ -1448,7 +1449,7 @@ p {
 
 .chat-panel {
   grid-template-columns: 270px minmax(0, 1fr);
-  min-height: 560px;
+  min-height: 0;
 }
 
 .chat-sidebar,
@@ -1463,6 +1464,8 @@ p {
 .request-list,
 .user-list,
 .token-list {
+  align-content: start;
+  align-items: start;
   gap: 6px;
   margin-top: 8px;
 }
@@ -1474,6 +1477,7 @@ p {
 .request-item,
 .user-item,
 .token-item {
+  align-self: start;
   border-radius: 6px;
   gap: 6px;
   padding: 8px;
@@ -1620,10 +1624,12 @@ p {
 }
 
 .workspace-tabs {
+  align-content: start;
   gap: 8px;
 }
 
 .workspace-tabbar {
+  align-items: center;
   border-radius: 7px;
   gap: 3px;
   padding: 3px;
@@ -1718,21 +1724,18 @@ p {
 
 @media (min-width: 1181px) {
   .side-panel {
-    display: grid;
-    grid-template-rows: auto auto minmax(0, 1fr);
-    height: calc(100vh - 78px);
-    overflow: hidden;
+    max-height: min(520px, calc(100vh - 86px));
+    overflow: auto;
     position: sticky;
     top: 68px;
   }
 
   .client-list {
-    max-height: none;
-    min-height: 0;
+    max-height: 390px;
   }
 
   .chat-panel {
-    height: min(620px, calc(100vh - 146px));
+    height: min(500px, calc(100vh - 132px));
     min-height: 0;
   }
 
