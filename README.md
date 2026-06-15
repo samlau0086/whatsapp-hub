@@ -640,6 +640,7 @@ If the client is online for a short time and then becomes offline while the agen
 - `.env` 和 `xxx-install.bat` 放在同一个文件夹。
 - 首次运行后，以后运行 `start-agent.bat`。
 - 如果提示安装 Node.js，请允许安装。
+- 如果提示 `spawn git`、`path git`、`ENOENT`，说明 Windows 没有安装 Git。新版安装脚本会尝试自动安装 Git；如果自动安装失败，请手动安装 [Git for Windows](https://git-scm.com/download/win)，重新打开 CMD/PowerShell 后再运行 `xxx-install.bat`。
 
 如果 `npm install` 失败，可以删除生成的 agent 文件夹后重新运行 install BAT。
 
@@ -988,6 +989,17 @@ npm -v
 
 在 agent 文件夹里执行 `npm install` 时，如果出现下载失败或超时，可以按下面顺序处理。Baileys 版 agent 不会下载 Chrome/Puppeteer，通常只需要解决 npm registry 网络问题。
 
+如果 Windows 日志里出现下面这类内容：
+
+```text
+npm error syscall spawn git
+npm error path git
+npm error code ENOENT
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@whiskeysockets/baileys'
+```
+
+这表示依赖没有安装成功，原因通常是系统没有 Git。请先安装 [Git for Windows](https://git-scm.com/download/win)，关闭并重新打开终端，然后删除 agent 文件夹里的 `node_modules` 和 `package-lock.json`，再重新运行 `xxx-install.bat`。
+
 第一步：清理 npm 缓存后重试。
 
 ```bash
@@ -1030,6 +1042,7 @@ npm install
 - `node -v` 不显示版本：Node.js 没安装成功，或终端没有刷新 PATH。
 - `npm -v` 不显示版本：npm 没安装成功，建议重新安装 Node.js LTS。
 - `npm install` 卡住很久：多半是网络访问 npm registry 很慢，可以切换 npm registry。
+- `npm error syscall spawn git` / `npm error path git`：Git 没安装或 PATH 没刷新。安装 Git for Windows 后，重新打开终端再运行安装脚本。
 - Windows 报 `EPERM`、`operation not permitted`：关闭正在运行的 agent、杀毒软件拦截窗口，再重新运行安装命令。
 - 已经手动装好 Node.js 后：重新打开终端，再运行生成的 `xxx-install.bat` 或 `npm install`。
 
@@ -1050,7 +1063,7 @@ start-agent.bat
 - 是否用不同 Windows 用户或不同工作目录启动。
 - `CLIENT_ID` 是否变化。
 
-注意：Baileys 版 agent 不需要安装 Chrome / Edge，也不会下载 Puppeteer Chrome。内网电脑只需要 Node.js、npm 和能访问 WhatsApp 网络的出口。
+注意：Baileys 版 agent 不需要安装 Chrome / Edge，也不会下载 Puppeteer Chrome。内网电脑需要 Node.js、npm、Git，以及能访问 WhatsApp 网络的出口。
 
 ### Agent 环境变量
 

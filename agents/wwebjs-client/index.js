@@ -23,7 +23,7 @@ import WebSocket from "ws";
 
 dotenv.config();
 
-const AGENT_VERSION = "baileys-2026-06-12.5";
+const AGENT_VERSION = "baileys-2026-06-15.1";
 
 const config = {
   hubUrl: process.env.HUB_URL || "http://localhost:3000",
